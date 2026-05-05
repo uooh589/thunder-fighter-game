@@ -358,11 +358,11 @@
   });
 
   // ===================== Player =====================
-  function makePlayer() { return { x: W/2, y: H-60, w: 28, h: 34, speed: 3.5 }; }
+  function makePlayer() { return { x: W/2, y: H-60, w: 28, h: 34, speed: 4.2 }; }
 
   // ===================== Attack Patterns =====================
   function getAttackPattern(level) {
-    var spd = 7.5;
+    var spd = 8.2;
     if (level <= 0) return [{ ox: 0, dx: 0, dy: -spd }];
 
     if (level === 1) return [
@@ -406,12 +406,12 @@
 
   // ===================== Enemy Type Config =====================
   var ENEMY_TYPES = [
-    { id: 'basic',   minScore: 0,   hp: 1, speed: [0.5, 1.2], size: [14, 24], weight: 45, color: 'red' },
-    { id: 'fast',    minScore: 100, hp: 1, speed: [1.5, 2.8], size: [10, 16], weight: 22, color: 'orange' },
-    { id: 'tank',    minScore: 200, hp: 3, speed: [0.3, 0.7], size: [26, 36], weight: 15, color: 'darkred' },
-    { id: 'shooter', minScore: 300, hp: 1, speed: [0.5, 1.0], size: [16, 24], weight: 18, color: 'magenta' },
-    { id: 'waver',   minScore: 400, hp: 1, speed: [0.6, 1.1], size: [14, 22], weight: 16, color: 'cyan' },
-    { id: 'splitter',minScore: 500, hp: 2, speed: [0.5, 1.0], size: [18, 26], weight: 12, color: 'green' },
+    { id: 'basic',   minScore: 0,   hp: 1, speed: [0.6, 1.5], size: [14, 24], weight: 45, color: 'red' },
+    { id: 'fast',    minScore: 100, hp: 1, speed: [1.8, 3.2], size: [10, 16], weight: 22, color: 'orange' },
+    { id: 'tank',    minScore: 200, hp: 3, speed: [0.4, 0.9], size: [26, 36], weight: 15, color: 'darkred' },
+    { id: 'shooter', minScore: 300, hp: 1, speed: [0.6, 1.2], size: [16, 24], weight: 18, color: 'magenta' },
+    { id: 'waver',   minScore: 400, hp: 1, speed: [0.7, 1.4], size: [14, 22], weight: 16, color: 'cyan' },
+    { id: 'splitter',minScore: 500, hp: 2, speed: [0.7, 1.2], size: [18, 26], weight: 12, color: 'green' },
   ];
 
   function getEnemyPool() {
@@ -497,7 +497,7 @@
       x: Math.random() * (W - size * 2) + size,
       y: -size - 10,
       w: size, h: size,
-      speed: 0.4 + Math.min(level, 8) * 0.08,
+      speed: 0.5 + Math.min(level, 8) * 0.10,
       type: 'elite',
       hp: hp, maxHp: hp,
       color: 'purple',
@@ -522,7 +522,7 @@
       w: 80 + Math.min(level, 10) * 6,
       h: 60 + Math.min(level, 10) * 4,
       hp: hp, maxHp: hp,
-      speed: 1.0 + Math.min(level, 5) * 0.15,
+      speed: 1.2 + Math.min(level, 5) * 0.18,
       dir: 1,
       state: 'entering',
       targetY: 70,
@@ -797,7 +797,7 @@
     var spawned = false;
     while (state.score >= state.eliteThreshold) {
       spawnElite(state.eliteThreshold);
-      state.eliteThreshold += 100;
+      state.eliteThreshold += 250;
       spawned = true;
     }
     while (state.score >= state.bossThreshold) {
@@ -837,7 +837,7 @@
     state.gameOver = false;
     state.frame = 0;
     state.shootCooldown = 0;
-    state.eliteThreshold = 150;
+    state.eliteThreshold = 300;
     state.bossThreshold = 1000;
     state.yellowTimer = 0;
     state.boss = null;
@@ -864,7 +864,7 @@
       var dy = touchY - p.y;
       var dist = Math.sqrt(dx*dx + dy*dy);
       if (dist > 5) {
-        var moveSpd = Math.min(5, dist * 0.12 + 2.5);
+        var moveSpd = Math.min(5.5, dist * 0.13 + 3);
         p.x += (dx / dist) * moveSpd;
         p.y += (dy / dist) * moveSpd;
       }
@@ -892,7 +892,7 @@
     }
 
     // --- Spawn enemies (dynamic rate based on score) ---
-    var spawnInterval = Math.max(25, 65 - Math.floor(state.score / 50));
+    var spawnInterval = Math.max(22, 55 - Math.floor(state.score / 60));
     if (state.frame % spawnInterval === 0) spawnEnemy();
 
     // --- Yellow orb spawn ---
@@ -1555,23 +1555,17 @@
       ctx.restore();
     }
 
-    // --- Shield visual (faint, doesn't cover player) ---
+    // --- Shield visual (barely visible, never covers player) ---
     if (state.shield > 0 && !state.gameOver) {
       var p = state.player;
-      var pulse = 1 + 0.06 * Math.sin(state.frame * 0.04);
+      var pulse = 1 + 0.04 * Math.sin(state.frame * 0.03);
       ctx.save();
-      ctx.strokeStyle = 'rgba(68, 221, 255, 0.12)';
-      ctx.lineWidth = 1.5;
-      ctx.shadowColor = 'rgba(68, 221, 255, 0.3)';
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 22 * pulse, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
       ctx.strokeStyle = 'rgba(68, 221, 255, 0.06)';
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 1;
+      ctx.shadowColor = 'rgba(68, 221, 255, 0.15)';
+      ctx.shadowBlur = 5;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 24 * pulse, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, 20 * pulse, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
