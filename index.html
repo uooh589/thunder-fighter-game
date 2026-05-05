@@ -125,6 +125,10 @@
     background: #1a3a5a;
     box-shadow: 0 0 15px rgba(51,153,255,0.4);
   }
+  .sound-btn {
+    background: none; border: none; color: #88ccff; cursor: pointer;
+    font-size: 14px; padding: 0 4px; vertical-align: middle; line-height: 1;
+  }
 
   /* --- Mobile Responsive --- */
   @media (max-width: 840px) {
@@ -239,7 +243,7 @@
       <span class="atk-label">⚡火力</span>
       <span class="atk-pips" id="atkPips"></span>
     </div>
-    <span><span id="autoDisplay"></span><span id="shieldDisplay"></span><span id="livesDisplay">❤❤❤</span></span>
+    <span><span id="autoDisplay"></span><span id="shieldDisplay"></span><span id="livesDisplay">❤❤❤</span><button id="soundBtn" class="sound-btn">🔊</button></span>
   </div>
   <div class="canvas-wrap" id="canvasWrap">
     <canvas id="gameCanvas" width="800" height="600"></canvas>
@@ -249,6 +253,7 @@
       <button class="tbtn" id="tbtnSkill">💣</button>
       <button class="tbtn tbtn-auto" id="tbtnAuto">🤖</button>
       <button class="tbtn" id="tbtnPause">⏸</button>
+      <button class="tbtn" id="tbtnSound">🔊</button>
       <button class="tbtn" id="tbtnRestart">✈</button>
     </div>
   </div>
@@ -274,9 +279,62 @@
   var W = 800;
   var H = isMobile ? Math.max(750, Math.min(1100, Math.round(800 * window.innerHeight / window.innerWidth))) : 600;
   canvas.width = W; canvas.height = H;
-  // Set canvas-wrap aspect ratio to match (prevents CSS stretch)
   document.getElementById('canvasWrap').style.aspectRatio = W + '/' + H;
   var MAX_ATK = 6;
+
+  // ===================== Audio System (Web Audio API) =====================
+  var actx = null;
+  var soundOn = true;
+  var soundBtn = document.getElementById('soundBtn');
+  function initAudio() { if (!actx) actx = new (window.AudioContext||window.webkitAudioContext)(); }
+  function playT(f, d, t, v) {
+    if (!soundOn || !actx) return; initAudio();
+    var o=actx.createOscillator(), g=actx.createGain();
+    o.type=t||'sine'; o.frequency.setValueAtTime(f,actx.currentTime);
+    g.gain.setValueAtTime(v||0.2,actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+d);
+    o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime+d);
+  }
+  function playN(d,v) {
+    if (!soundOn||!actx) return; initAudio();
+    var s=actx.sampleRate, buf=actx.createBuffer(1,s*d,actx.sampleRate), data=buf.getChannelData(0);
+    for(var i=0;i<s*d;i++) data[i]=Math.random()*2-1;
+    var src=actx.createBufferSource();src.buffer=buf;
+    var g=actx.createGain(); g.gain.setValueAtTime(v||0.15,actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+d);
+    var f=actx.createBiquadFilter();f.type='lowpass';f.frequency.setValueAtTime(800,actx.currentTime);
+    src.connect(f);f.connect(g);g.connect(actx.destination);src.start();
+  }
+  function playSFX(e) {
+    switch(e){
+      case'shoot':playT(660,0.05,'square',0.12);break;
+      case'enemyShoot':playT(440,0.04,'sine',0.08);break;
+      case'explode':playN(0.12,0.2);playT(200,0.1,'sawtooth',0.1);break;
+      case'hit':playT(150,0.15,'sawtooth',0.25);break;
+      case'powerup':playT(400,0.08,'sine',0.15);
+        setTimeout(function(){playT(600,0.08,'sine',0.15)},80);
+        setTimeout(function(){playT(800,0.12,'sine',0.15)},160);break;
+      case'score':playT(880,0.08,'sine',0.1);break;
+      case'skill':playN(0.4,0.3);playT(200,0.3,'sawtooth',0.2);
+        setTimeout(function(){playT(80,0.3,'sawtooth',0.15)},50);break;
+      case'graze':playT(1200,0.03,'sine',0.06);break;
+      case'levelup':playT(523,0.08,'sine',0.15);
+        setTimeout(function(){playT(659,0.08,'sine',0.15)},90);
+        setTimeout(function(){playT(784,0.15,'sine',0.15)},180);break;
+      case'gameover':playT(400,0.2,'sawtooth',0.2);
+        setTimeout(function(){playT(200,0.3,'sawtooth',0.18)},200);
+        setTimeout(function(){playT(80,0.5,'sawtooth',0.15)},500);break;
+      case'boss':playT(80,0.5,'sine',0.15);
+        setTimeout(function(){playT(60,0.3,'sawtooth',0.12)},300);break;
+      case'heart':playT(500,0.2,'sine',0.15);break;
+      case'shield':playT(300,0.15,'triangle',0.12);break;
+    }
+  }
+  function toggleSound() {
+    soundOn = !soundOn;
+    soundBtn.textContent = soundOn ? '🔊' : '🔇';
+    if (soundOn) initAudio();
+  }
 
   // ===================== State =====================
   var state = {
@@ -347,6 +405,8 @@
     document.getElementById('pauseBtn').textContent = state.paused ? '▶ 继续' : '⏸ 暂停';
   });
   document.getElementById('tbtnRestart').addEventListener('click', function() { if (state.gameOver) { state.paused = false; restartGame(); } else { state.paused = false; restartGame(); } });
+  document.getElementById('tbtnSound').addEventListener('click', function() { toggleSound(); this.textContent = soundOn ? '🔊' : '🔇'; });
+  document.getElementById('soundBtn').addEventListener('click', toggleSound);
 
   // ===================== Touch Controls =====================
   var touchActive = false;
@@ -516,6 +576,7 @@
   // ===================== Entity Spawners =====================
   function spawnPlayerBullets() {
     if (state.bullets.length >= 50) return;
+    if (state.frame % 4 === 0) playSFX('shoot');
     var p = state.player;
     var pattern = getAttackPattern(state.attackLevel);
     for (var i = 0; i < pattern.length; i++) {
@@ -604,6 +665,7 @@
   }
 
   function spawnBoss(milestone) {
+    playSFX('boss');
     var level = milestone / 1000;
     var hp = 40 + Math.floor(level * 30);
     state.boss = {
@@ -626,6 +688,7 @@
 
   function spawnEnemyBullet(x, y, vx, vy) {
     if (state.enemyBullets.length >= 80) return;
+    playSFX('enemyShoot');
     state.enemyBullets.push({ x: x, y: y, vx: vx, vy: vy, w: 6, h: 6 });
   }
 
@@ -657,6 +720,7 @@
 
   // ===================== Level Up Effect =====================
   function spawnLevelUpEffect(x, y) {
+    playSFX('levelup');
     // Expanding ring
     state.particles.push({
       x: x, y: y, vx: 0, vy: 0,
@@ -731,6 +795,7 @@
   // ===================== Skill: Full-Screen Bombardment =====================
   function activateBombardment() {
     if (state.skillCooldown > 0) return;
+    playSFX('skill');
     state.skillCooldown = 300; // 5 seconds
     state.skillReady = false;
 
@@ -951,7 +1016,7 @@
         var dx = p.x - eb.x, dy = p.y - eb.y;
         var d = Math.sqrt(dx*dx + dy*dy);
         if (d < 32 && d > p.hitboxR + 6) { ai.gc++; ai.combo++; ai.gf = 10;
-          spawnExplosion(eb.x, eb.y, 5, 'blue'); addBonusScore(1); }
+          playSFX('graze'); spawnExplosion(eb.x, eb.y, 5, 'blue'); addBonusScore(1); }
       }
       // --- Rank: combo/no-hit → D/C/B/A/S/SS ---
       var rankNames = ['D','C','B','A','S','SS'];
@@ -1381,6 +1446,7 @@
           e.hp--;
           if (e.hp <= 0) {
             var color = e.type === 'elite' ? 'purple' : e.color === 'green' ? 'green' : 'orange';
+            playSFX('explode');
             spawnExplosion(e.x, e.y, e.w, color);
             // Splitter splits into 2 minions
             if (e.type === 'splitter') {
@@ -1490,6 +1556,7 @@
       if (state.ai_) { state.ai_.combo = 0; state.ai_.nh = 0; }
       if (state.shield > 0) {
         state.shield = 0;
+        playSFX('shield');
         spawnExplosion(p.x, p.y - 20, 25, 'blue');
         state.invincible = 30;
         updateUI();
@@ -1497,14 +1564,16 @@
       }
       if (state.followers.length > 0) {
         removeFollower();
+        playSFX('hit');
         state.invincible = 30;
         updateUI();
         return false;
       }
       state.lives--;
       state.invincible = 60;
+      playSFX('hit');
       updateUI();
-      if (state.lives <= 0) { state.gameOver = true; return true; }
+      if (state.lives <= 0) { state.gameOver = true; playSFX('gameover'); return true; }
       return true;
     }
 
@@ -1557,20 +1626,25 @@
         if (o.type === 'blue') {
           if (state.attackLevel < MAX_ATK) {
             state.attackLevel++;
+            playSFX('powerup');
             spawnLevelUpEffect(o.x, o.y);
             addKillScore(20);
           } else {
-            spawnFollower(); // Add/upgrade follower instead of +50
+            playSFX('powerup');
+            spawnFollower();
             addKillScore(10);
           }
         } else if (o.type === 'yellow') {
+          playSFX('score');
           spawnExplosion(o.x, o.y, 15, 'yellow');
           addBonusScore(50);
         } else if (o.type === 'heart') {
+          playSFX('heart');
           spawnExplosion(o.x, o.y, 15, 'yellow');
           if (state.lives < state.maxLives) state.lives++;
           updateUI();
         } else if (o.type === 'shield') {
+          playSFX('shield');
           spawnExplosion(o.x, o.y, 15, 'blue');
           state.shield = 1;
         }
