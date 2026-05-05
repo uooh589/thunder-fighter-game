@@ -280,7 +280,7 @@
   var H = isMobile ? Math.max(750, Math.min(1100, Math.round(800 * window.innerHeight / window.innerWidth))) : 600;
   canvas.width = W; canvas.height = H;
   document.getElementById('canvasWrap').style.aspectRatio = W + '/' + H;
-  var MAX_ATK = 6;
+  var MAX_ATK = 15;
 
   // ===================== Audio System (Web Audio API) =====================
   var actx = null;
@@ -548,8 +548,7 @@
       { ox: -20, dx: -6, dy: -7 },
       { ox: 20, dx: 6, dy: -7 }
     ];
-    // level 5+
-    return [
+    if (level === 5) return [
       { ox: -15, dx: -5.5, dy: -spd },
       { ox: -10, dx: -3.5, dy: -spd },
       { ox: -5, dx: -1.5, dy: -spd },
@@ -560,7 +559,39 @@
       { ox: -24, dx: -7.5, dy: -6 },
       { ox: 24, dx: 7.5, dy: -6 }
     ];
+    if (level === 6) return [
+      { ox: -18, dx: -6.5, dy: -spd }, { ox: -13, dx: -4.5, dy: -spd },
+      { ox: -8, dx: -2.8, dy: -spd }, { ox: -3, dx: -1, dy: -spd },
+      { ox: 0, dx: 0, dy: -spd },
+      { ox: 3, dx: 1, dy: -spd }, { ox: 8, dx: 2.8, dy: -spd },
+      { ox: 13, dx: 4.5, dy: -spd }, { ox: 18, dx: 6.5, dy: -spd },
+      { ox: -28, dx: -9, dy: -5.5 }, { ox: 28, dx: 9, dy: -5.5 }
+    ];
+    if (level === 7) return [
+      { ox: -20, dx: -7, dy: -spd }, { ox: -15, dx: -5, dy: -spd },
+      { ox: -10, dx: -3.2, dy: -spd }, { ox: -5, dx: -1.5, dy: -spd },
+      { ox: 0, dx: 0, dy: -spd },
+      { ox: 5, dx: 1.5, dy: -spd }, { ox: 10, dx: 3.2, dy: -spd },
+      { ox: 15, dx: 5, dy: -spd }, { ox: 20, dx: 7, dy: -spd },
+      { ox: -30, dx: -10, dy: -5 }, { ox: 30, dx: 10, dy: -5 },
+      { ox: -36, dx: -12, dy: -4 }, { ox: 36, dx: 12, dy: -4 }
+    ];
+    // level 8+: maximum火力
+    var extra = Math.floor((level - 6) / 2);
+    var result = [];
+    for (var ai = -6 - extra; ai <= 6 + extra; ai++) {
+      if (ai === 0 || Math.abs(ai) % 2 === 0) continue;
+      var ox2 = ai * 5 + (ai > 0 ? -2 : 2);
+      result.push({ ox: ox2, dx: ai * 1.2, dy: -spd });
+    }
+    // Side shots
+    var sideSpd = Math.max(3, 6 - extra);
+    result.push({ ox: -32 - extra*4, dx: -10 - extra, dy: -sideSpd });
+    result.push({ ox: 32 + extra*4, dx: 10 + extra, dy: -sideSpd });
+    return result;
   }
+
+  function getBulletDmg() { return 1 + Math.floor(state.attackLevel / 4); }
 
   // ===================== Enemy Type Config =====================
   var ENEMY_TYPES = [
@@ -1264,7 +1295,8 @@
               x: f.x, y: f.y,
               vx: Math.cos(angle) * bulletSpeed,
               vy: Math.sin(angle) * bulletSpeed,
-              w: 3, h: 5
+              w: 3, h: 5,
+              dmg: 1 + Math.floor(f.level / 3)
             });
           }
         }
@@ -1471,10 +1503,10 @@
         var e = state.enemies[j];
         if (b.x > e.x - e.w/2 && b.x < e.x + e.w/2 &&
             b.y > e.y - e.h/2 && b.y < e.y + e.h/2) {
-          e.hp--;
+          e.hp -= getBulletDmg();
           if (e.hp <= 0) {
             var color = e.type === 'elite' ? 'purple' : e.color === 'green' ? 'green' : 'orange';
-            state.screenShake = 6;
+            state.screenShake = Math.min(12, state.screenShake + 3);
             playSFX('explode');
             spawnExplosion(e.x, e.y, e.w, color);
             // Splitter splits into 2 minions
@@ -1501,7 +1533,7 @@
         var boss = state.boss;
         if (b.x > boss.x - boss.w/2 && b.x < boss.x + boss.w/2 &&
             b.y > boss.y - boss.h/2 && b.y < boss.y + boss.h/2) {
-          boss.hp--;
+          boss.hp -= getBulletDmg();
           boss.flash = 4;
           if (boss.hp <= 0) {
             spawnExplosion(boss.x, boss.y, boss.w, 'boss');
@@ -1535,7 +1567,7 @@
         var e = state.enemies[j];
         if (fb.x > e.x - e.w/2 && fb.x < e.x + e.w/2 &&
             fb.y > e.y - e.h/2 && fb.y < e.y + e.h/2) {
-          e.hp--;
+          e.hp -= (fb.dmg || 1);
           if (e.hp <= 0) {
             spawnExplosion(e.x, e.y, e.w, e.type === 'elite' ? 'purple' : 'cyan');
             if (e.type === 'splitter') {
@@ -1559,7 +1591,7 @@
         var boss = state.boss;
         if (fb.x > boss.x - boss.w/2 && fb.x < boss.x + boss.w/2 &&
             fb.y > boss.y - boss.h/2 && fb.y < boss.y + boss.h/2) {
-          boss.hp--;
+          boss.hp -= (fb.dmg || 1);
           boss.flash = 3;
           if (boss.hp <= 0) {
             spawnExplosion(boss.x, boss.y, boss.w, 'boss');
