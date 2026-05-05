@@ -245,6 +245,7 @@
     skillCooldown: 0,
     skillReady: false,
     autoPlay: false,
+    speedMul: 1,
     flashOverlay: null,
     levelUpText: 0,
     running: true
@@ -255,7 +256,11 @@
   window.addEventListener('keydown', function(e) {
     keys[e.key] = true;
     if (e.key === 'r' || e.key === 'R') restartGame();
-    if (e.key === 'q' || e.key === 'Q') { state.autoPlay = !state.autoPlay; updateUI(); }
+    if (e.key === 'q' || e.key === 'Q') {
+      state.autoPlay = !state.autoPlay;
+      state.speedMul = state.autoPlay ? 1.5 : 1;
+      updateUI();
+    }
     if (e.key === 'e' || e.key === 'E') { activateBombardment(); keys['e'] = false; keys['E'] = false; }
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
         e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ') e.preventDefault();
@@ -831,6 +836,7 @@
     state.skillCooldown = 0;
     state.skillReady = false;
     state.autoPlay = false;
+    state.speedMul = 1;
     state.flashOverlay = null;
     state.levelUpText = 0;
     state.running = true;
@@ -848,56 +854,81 @@
     var p = state.player;
 
     if (state.autoPlay && !state.gameOver) {
-      // Auto-play AI: calculate safest direction
-      var threatX = 0, threatY = 0, hasThreat = false;
-      // Evaluate enemy bullets
+      // ---- Auto-play AI: aggressive hunter ----
+      var moveX = 0, moveY = 0;
+
+      // 1) Threat avoidance (weighted by proximity & density)
       for (var bi = 0; bi < state.enemyBullets.length; bi++) {
         var eb = state.enemyBullets[bi];
-        var dx = eb.x - p.x, dy = eb.y - p.y;
+        var dx = p.x - eb.x, dy = p.y - eb.y;
         var dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 200 && dist > 0) {
-          var urgency = (200 - dist) / 200;
-          threatX -= (dx / dist) * urgency * 8;
-          threatY -= (dy / dist) * urgency * 8;
-          hasThreat = true;
+        if (dist < 250 && dist > 0) {
+          var urgency = Math.max(0, (250 - dist) / 250);
+          moveX += (dx / dist) * urgency * 12;
+          moveY += (dy / dist) * urgency * 12;
         }
       }
-      // Move toward nearest enemy if safe
-      var targetX = W/2, targetY = H * 0.3;
-      var nearDist = Infinity;
+
+      // 2) Attack: move toward enemy CLUSTER (highest density area)
+      var clusterX = 0, clusterY = 0, clusterCount = 0;
       for (var ei = 0; ei < state.enemies.length; ei++) {
         var e = state.enemies[ei];
-        var dx = e.x - p.x, dy = e.y - p.y;
-        var d = Math.sqrt(dx*dx + dy*dy);
-        if (d < nearDist) { nearDist = d; targetX = e.x; targetY = e.y; }
+        // Weight elites/boss more
+        var weight = e.type === 'elite' ? 3 : 1;
+        clusterX += e.x * weight;
+        clusterY += e.y * weight;
+        clusterCount += weight;
       }
-      var toTargetX = targetX - p.x, toTargetY = targetY - p.y;
-      var targetDist = Math.sqrt(toTargetX*toTargetX + toTargetY*toTargetY);
+      if (clusterCount > 0) {
+        clusterX /= clusterCount;
+        clusterY /= clusterCount;
+        var dx = clusterX - p.x, dy = clusterY - p.y;
+        var dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 10) {
+          moveX += (dx / dist) * 4;
+          moveY += (dy / dist) * 4;
+        }
+      } else {
+        // No enemies: patrol center-upper area
+        moveX += (W/2 - p.x) * 0.02;
+        moveY += (H*0.3 - p.y) * 0.02;
+      }
 
-      // Combine: flee threats + approach enemies
-      var moveX = 0, moveY = 0;
-      if (hasThreat) {
-        moveX = threatX;
-        moveY = threatY;
-      } else if (targetDist > 30) {
-        moveX = toTargetX / targetDist * 3;
-        moveY = toTargetY / targetDist * 3;
-      }
-      // Collect nearby orbs
+      // 3) Collect items aggressively
+      var closestItem = null, closestDist = Infinity;
       for (var oi = 0; oi < state.orbs.length; oi++) {
         var o = state.orbs[oi];
         var dx = o.x - p.x, dy = o.y - p.y;
         var d = Math.sqrt(dx*dx + dy*dy);
-        if (d < 150) {
-          moveX += (dx / d) * 2;
-          moveY += (dy / d) * 2;
+        // Prioritize: heart > blue > shield > yellow
+        var priority = o.type === 'heart' ? 0 : o.type === 'blue' ? 1 : o.type === 'shield' ? 2 : 3;
+        var adjustedDist = d * (1 + priority * 0.5);
+        if (adjustedDist < closestDist) {
+          closestDist = adjustedDist;
+          closestItem = o;
         }
       }
-      // Clamp move speed to player speed
+      if (closestItem) {
+        var dx = closestItem.x - p.x, dy = closestItem.y - p.y;
+        var d = Math.sqrt(dx*dx + dy*dy);
+        if (d < 200) {
+          moveX += (dx / d) * 5;
+          moveY += (dy / d) * 5;
+        }
+      }
+
+      // Clamp to max speed (with 1.5x multiplier)
+      var maxSpeed = p.speed * state.speedMul;
       var moveLen = Math.sqrt(moveX*moveX + moveY*moveY);
-      if (moveLen > p.speed) {
-        moveX = moveX / moveLen * p.speed;
-        moveY = moveY / moveLen * p.speed;
+      if (moveLen > maxSpeed) {
+        moveX = moveX / moveLen * maxSpeed;
+        moveY = moveY / moveLen * maxSpeed;
+      } else if (moveLen > 0 && moveLen < maxSpeed * 0.5) {
+        // Always move at least 50% speed when there are enemies
+        if (state.enemies.length > 0 || state.enemyBullets.length > 0) {
+          moveX = moveX / moveLen * maxSpeed * 0.5;
+          moveY = moveY / moveLen * maxSpeed * 0.5;
+        }
       }
       p.x += moveX;
       p.y += moveY;
@@ -934,7 +965,7 @@
     }
 
     // --- Spawn enemies (dynamic rate based on score) ---
-    var spawnInterval = Math.max(20, 50 - Math.floor(state.score / 60));
+    var spawnInterval = Math.max(20, Math.round((50 - Math.floor(state.score / 60)) / state.speedMul));
     if (state.frame % spawnInterval === 0) spawnEnemy();
 
     // --- Yellow orb spawn ---
@@ -963,7 +994,7 @@
     // --- Follower update ---
     for (var i = 0; i < state.followers.length; i++) {
       var f = state.followers[i];
-      f.angle += f.orbitSpeed * 0.7;
+      f.angle += f.orbitSpeed * 0.7 * state.speedMul;
       f.x = state.player.x + Math.cos(f.angle) * f.orbitRadius;
       f.y = state.player.y + Math.sin(f.angle) * f.orbitRadius;
       // Follower barrage shooting
@@ -1003,10 +1034,12 @@
       }
     }
 
-    // --- Auto-play: auto-use skill when many enemies ---
+    // --- Auto-play: auto-use skill strategically ---
     if (state.autoPlay && state.skillReady) {
-      var enemyCount = state.enemies.length + state.enemyBullets.length;
-      if (enemyCount > 10 || (state.boss && state.boss.hp > 0)) {
+      var threat = state.enemies.length + state.enemyBullets.length * 0.5;
+      var hasElite = false;
+      for (var si = 0; si < state.enemies.length; si++) { if (state.enemies[si].type === 'elite') hasElite = true; }
+      if (threat > 8 || hasElite || (state.boss && state.boss.hp > 0)) {
         activateBombardment();
       }
     }
@@ -1017,8 +1050,8 @@
     // --- Move player bullets ---
     for (var i = state.bullets.length - 1; i >= 0; i--) {
       var b = state.bullets[i];
-      b.x += b.vx;
-      b.y += b.vy;
+      b.x += b.vx * state.speedMul;
+      b.y += b.vy * state.speedMul;
       if (b.y + b.h < 0 || b.y > H || b.x < -20 || b.x > W + 20) {
         state.bullets.splice(i, 1);
       }
@@ -1027,8 +1060,8 @@
     // --- Move enemy bullets ---
     for (var i = state.enemyBullets.length - 1; i >= 0; i--) {
       var eb = state.enemyBullets[i];
-      eb.x += eb.vx;
-      eb.y += eb.vy;
+      eb.x += eb.vx * state.speedMul;
+      eb.y += eb.vy * state.speedMul;
       if (eb.y > H + 20 || eb.y < -20 || eb.x < -20 || eb.x > W + 20) {
         state.enemyBullets.splice(i, 1);
       }
@@ -1037,8 +1070,8 @@
     // --- Move follower bullets ---
     for (var i = state.followerBullets.length - 1; i >= 0; i--) {
       var fb = state.followerBullets[i];
-      fb.x += fb.vx;
-      fb.y += fb.vy;
+      fb.x += fb.vx * state.speedMul;
+      fb.y += fb.vy * state.speedMul;
       if (fb.y > H + 20 || fb.y < -20 || fb.x < -20 || fb.x > W + 20) {
         state.followerBullets.splice(i, 1);
       }
@@ -1051,7 +1084,7 @@
 
       if (e.type === 'elite') {
         e.x = e.baseX + Math.sin(state.frame * e.oscSpeed) * e.oscRange;
-        e.y += e.speed;
+        e.y += e.speed * state.speedMul;
         e.shootTimer--;
         if (e.shootTimer <= 0) {
           var px = state.player.x - e.x;
@@ -1084,9 +1117,9 @@
         }
       } else if (e.type === 'waver') {
         e.x += Math.sin(state.frame * e.oscSpeed + e.oscPhase) * 2;
-        e.y += e.speed;
+        e.y += e.speed * state.speedMul;
       } else if (e.type === 'shooter') {
-        e.y += e.speed;
+        e.y += e.speed * state.speedMul;
         e.shootTimer--;
         if (e.shootTimer <= 0 && e.y > 0 && e.y < H * 0.6) {
           var px = state.player.x - e.x;
@@ -1098,7 +1131,7 @@
           e.shootTimer = 60 + Math.floor(Math.random() * 40);
         }
       } else {
-        e.y += e.speed;
+        e.y += e.speed * state.speedMul;
       }
       // Remove off-screen
       if (e.y - e.h > H) {
@@ -1410,7 +1443,7 @@
     // --- Move orbs ---
     for (var i = state.orbs.length - 1; i >= 0; i--) {
       var o = state.orbs[i];
-      o.y += o.vy;
+      o.y += o.vy * state.speedMul;
       o.timer++;
       if (o.y > H + 20) state.orbs.splice(i, 1);
     }
