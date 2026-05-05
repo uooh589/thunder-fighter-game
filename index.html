@@ -857,27 +857,48 @@
     var p = state.player;
 
     if (state.autoPlay && !state.gameOver) {
-      // ===== Flow Combat AI: 穿梭弹幕 + 走位输出 =====
+      // ===== Aggressive Score Hunter AI =====
       var maxSpd = p.speed * state.speedMul;
-      var maxSpdSq = maxSpd * maxSpd;
       var flowX = 0, flowY = 0;
 
-      // --- LAYER 0: Enemy ship collision avoidance (紧急避险:撞不到我) ---
-      var enemyAvoidX = 0, enemyAvoidY = 0;
+      // --- LAYER 0: Hard avoidance (boss/elite/enemy ships + bullets) ---
+      var evadeX = 0, evadeY = 0, mustEvade = false;
+
+      // Enemy ship collision (including boss)
       for (var ei = 0; ei < state.enemies.length; ei++) {
         var e = state.enemies[ei];
         var dx = p.x - e.x, dy = p.y - e.y;
         var dist = Math.sqrt(dx*dx + dy*dy);
-        var dangerR = p.hitboxR + e.w/2 + 40; // 40px safety margin
+        var dangerR = p.hitboxR + e.w/2 + 50;
         if (dist < dangerR && dist > 1) {
           var urgency = (dangerR - dist) / dangerR;
-          enemyAvoidX += (dx/dist) * urgency * 12;
-          enemyAvoidY += (dy/dist) * urgency * 12;
+          evadeX += (dx/dist) * urgency * 15;
+          evadeY += (dy/dist) * urgency * 15;
+          mustEvade = true;
+        }
+      }
+      // Boss hard avoidance (wide margin - never fly over boss)
+      if (state.boss) {
+        var boss = state.boss;
+        var dx = p.x - boss.x, dy = p.y - boss.y;
+        var dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < 150) {
+          // Push below and away from boss
+          var pushX = (p.x - boss.x) / dist;
+          var pushY = Math.abs(dy) < 1 ? 1 : (p.y - boss.y) / dist;
+          if (pushY < 0) pushY = 0.5; // never go above boss
+          evadeX += pushX * 12;
+          evadeY += pushY * 15;
+          mustEvade = true;
+        }
+        // Hard floor: never go above boss top
+        if (p.y < boss.y + boss.h/2 + 20) {
+          evadeY += 15;
+          mustEvade = true;
         }
       }
 
-      // --- LAYER 1: Emergency reflex (bullet on collision course? perpendicular dodge) ---
-      var urgentX = 0, urgentY = 0, urgent = false;
+      // Bullet emergency (perpendicular dodge)
       for (var bi = 0; bi < state.enemyBullets.length; bi++) {
         var eb = state.enemyBullets[bi];
         var ddx = p.x - eb.x, ddy = p.y - eb.y;
@@ -886,107 +907,115 @@
         if (vlen2 < 0.1) continue;
         var t = -(ddx*vx + ddy*vy) / vlen2;
         if (t > 0 && t < 25) {
-          var cx = eb.x + vx*t, cy = eb.y + vy*t;
-          var dist = Math.sqrt((p.x-cx)*(p.x-cx) + (p.y-cy)*(p.y-cy));
+          var dist = Math.sqrt((p.x - (eb.x + vx*t))*(p.x - (eb.x + vx*t)) + (p.y - (eb.y + vy*t))*(p.y - (eb.y + vy*t)));
           if (dist < p.hitboxR + 6) {
             var len = Math.sqrt(vlen2);
-            urgentX += (-vy / len) * 15;
-            urgentY += (vx / len) * 15;
-            urgent = true;
+            evadeX += (-vy / len) * 18;
+            evadeY += (vx / len) * 18;
+            mustEvade = true;
           }
         }
       }
-      // Merge enemy avoidance into urgent if active
-      if (urgent || Math.sqrt(enemyAvoidX*enemyAvoidX+enemyAvoidY*enemyAvoidY) > 5) {
-        var evadeX = urgentX + enemyAvoidX * 2;
-        var evadeY = urgentY + enemyAvoidY * 2;
+
+      if (mustEvade) {
         var eLen = Math.sqrt(evadeX*evadeX + evadeY*evadeY);
         if (eLen > 0) { p.x += evadeX/eLen * maxSpd; p.y += evadeY/eLen * maxSpd; }
         p.x = Math.max(p.hitboxR, Math.min(W-p.hitboxR, p.x));
         p.y = Math.max(p.hitboxR, Math.min(H-p.hitboxR, p.y));
       } else {
-        // ===== LAYER 2: Combat positioning =====
-        // Repel from enemy ships (soft, not as urgent as Layer 0)
+        // ===== COMBAT & SCORE HUNTING =====
+
+        // 1) Target priority: boss → elites → cluster
+        var targetX = W/2, targetY = H * 0.35;
+        var hasTarget = false;
+
+        if (state.boss) {
+          // Focus fire boss: stay below, wide sweep
+          targetX = state.boss.x + Math.sin(state.frame * 0.025) * 120;
+          targetY = Math.min(H * 0.7, state.boss.y + state.boss.h/2 + 100);
+          hasTarget = true;
+        } else {
+          // Find elite-weighted center
+          var cx = 0, cy = 0, cw = 0;
+          for (var ei = 0; ei < state.enemies.length; ei++) {
+            var e = state.enemies[ei];
+            var w = e.type === 'elite' ? 10 : e.type === 'tank' ? 3 : 2;
+            cx += e.x * w; cy += e.y * w; cw += w;
+          }
+          if (cw > 0) {
+            cx /= cw; cy /= cw;
+            targetX = cx + Math.sin(state.frame * 0.03) * 160;
+            targetY = Math.min(H * 0.65, cy + 130);
+            hasTarget = true;
+          }
+        }
+
+        if (hasTarget) {
+          var dx = targetX - p.x, dy = targetY - p.y;
+          var d = Math.sqrt(dx*dx + dy*dy);
+          if (d > 5) {
+            var pull = Math.min(1.2, d / 180);
+            flowX += (dx/d) * pull * 6;
+            flowY += (dy/d) * pull * 5;
+          }
+        } else {
+          flowX += (W/2 - p.x + Math.sin(state.frame*0.02)*180) * 0.04;
+          flowY += (H*0.35 - p.y) * 0.04;
+        }
+
+        // 2) Soft repel from enemy ships & bullets
         for (var ei = 0; ei < state.enemies.length; ei++) {
           var e = state.enemies[ei];
           var dx = p.x - e.x, dy = p.y - e.y;
           var dist = Math.sqrt(dx*dx + dy*dy);
-          var repelR = p.hitboxR + e.w/2 + 80;
-          if (dist < repelR && dist > 1) {
-            var force = (repelR - dist) / repelR;
-            flowX += (dx/dist) * force * 5;
-            flowY += (dy/dist) * force * 5;
+          if (dist < 100 && dist > 1) {
+            var force = (100 - dist) / 100;
+            flowX += (dx/dist) * force * 4;
+            flowY += (dy/dist) * force * 4;
           }
         }
-
-        // Repel from bullets
         for (var bi = 0; bi < state.enemyBullets.length; bi++) {
           var eb = state.enemyBullets[bi];
           var dx = p.x - eb.x, dy = p.y - eb.y;
           var dist = Math.sqrt(dx*dx + dy*dy);
-          if (dist < 200 && dist > 1) {
-            var force = Math.max(0, (200 - dist) / 200);
-            flowX += (dx/dist) * force * 5;
-            flowY += (dy/dist) * force * 5;
+          if (dist < 180 && dist > 1) {
+            var force = Math.max(0, (180 - dist) / 180);
+            flowX += (dx/dist) * force * 4;
+            flowY += (dy/dist) * force * 4;
           }
         }
 
-        // Attract to combat zone with optimal firing distance
-        var cx = 0, cy = 0, cw = 0, cMinY = H;
-        for (var ei = 0; ei < state.enemies.length; ei++) {
-          var e = state.enemies[ei];
-          var w = e.type === 'elite' ? 4 : e.type === 'tank' ? 2 : 1.5;
-          cx += e.x * w; cy += e.y * w; cw += w;
-          if (e.y < cMinY) cMinY = e.y;
-        }
-        if (cw > 0) {
-          cx /= cw; cy /= cw;
-          // Optimal firing range: 150-250px below enemies (spread covers max area)
-          var targetX = cx;
-          var targetY = Math.max(p.hitboxR, Math.min(H * 0.7, cy + 180));
-          // Horizontal sweep: oscillate around enemy center for spread coverage
-          var sweep = Math.sin(state.frame * 0.025) * 120;
-          targetX += sweep;
-          var dx = targetX - p.x, dy = targetY - p.y;
-          var d = Math.sqrt(dx*dx + dy*dy);
-          if (d > 10) {
-            var pull = Math.min(1, d / 200);
-            flowX += (dx/d) * pull * 4;
-            flowY += (dy/d) * pull * 4;
-          }
-        } else {
-          // No enemies: patrol with sweeping motion
-          var patrolX = W/2 + Math.sin(state.frame * 0.02) * 150;
-          var patrolY = H * 0.35;
-          flowX += (patrolX - p.x) * 0.03;
-          flowY += (patrolY - p.y) * 0.03;
-        }
-
-        // Attract to items (quick detours)
+        // 3) Aggressive item collection (score! score! score!)
+        // Chase closest blue/yellow orb aggressively
+        var bestItem = null, bestItemScore = -Infinity;
         for (var oi = 0; oi < state.orbs.length; oi++) {
           var o = state.orbs[oi];
           var dx = o.x - p.x, dy = o.y - p.y;
           var d = Math.sqrt(dx*dx + dy*dy);
-          if (d < 250 && d > 1) {
-            var prio = o.type === 'heart' ? 3 : o.type === 'blue' ? 2 : o.type === 'shield' ? 1.5 : 1;
-            flowX += (dx/d) * (250-d)/250 * prio * 3;
-            flowY += (dy/d) * (250-d)/250 * prio * 3;
+          if (d > 350) continue;
+          var prio = o.type === 'blue' ? 5 : o.type === 'yellow' ? 4 : o.type === 'heart' ? 6 : o.type === 'shield' ? 3 : 0;
+          var score = prio * 100 - d;
+          if (score > bestItemScore) { bestItemScore = score; bestItem = o; }
+        }
+        if (bestItem) {
+          var dx = bestItem.x - p.x, dy = bestItem.y - p.y;
+          var d = Math.sqrt(dx*dx + dy*dy);
+          if (d > 5) {
+            var urgency = Math.min(2, 350 / Math.max(d, 1));
+            flowX += (dx/d) * urgency * 6;
+            flowY += (dy/d) * urgency * 6;
           }
         }
 
-        // --- LAYER 3: Dynamic weave (观赏性穿行) ---
+        // 4) Dynamic weave (观赏性)
         var flowLen = Math.sqrt(flowX*flowX + flowY*flowY);
         if (flowLen > 1) {
           var fx = flowX / flowLen, fy = flowY / flowLen;
-          var px = -fy, py = fx;
-          // Biaxial oscillation for figure-8 patterns
-          var oscT = state.frame * 0.045;
-          var oscAmp = 2.5 + Math.sin(state.frame * 0.02) * 1.5;
-          flowX += px * Math.sin(oscT) * oscAmp;
-          flowY += py * Math.cos(oscT * 0.7) * oscAmp * 0.8;
+          flowX += -fy * Math.sin(state.frame * 0.05) * 3;
+          flowY += fx * Math.cos(state.frame * 0.04) * 2.5;
         } else {
-          flowX += Math.sin(state.frame * 0.04) * 1.5;
-          flowY += Math.cos(state.frame * 0.03) * 1.0;
+          flowX += Math.sin(state.frame * 0.04) * 2;
+          flowY += Math.cos(state.frame * 0.03) * 1.5;
         }
 
         // Apply
@@ -1103,15 +1132,14 @@
       }
     }
 
-    // --- Auto-play: dramatic skill usage ---
+    // --- Auto-play: aggressive skill usage (boss > elite > crowd) ---
     if (state.autoPlay && state.skillReady) {
-      var enemyCount = state.enemies.length;
-      var bulletCount = state.enemyBullets.length;
-      var bossAlive = state.boss && state.boss.hp > 0;
+      var hasBoss = state.boss && state.boss.hp > 0;
       var hasElite = false;
       for (var si = 0; si < state.enemies.length; si++) { if (state.enemies[si].type === 'elite') hasElite = true; }
-      // Use skill when: many enemies / bullets, elite present, boss, or every ~10s for show
-      if (bulletCount > 5 || enemyCount > 5 || hasElite || bossAlive || (state.frame % 600 === 0 && enemyCount > 0)) {
+      var crowd = state.enemies.length > 4 || state.enemyBullets.length > 6;
+      // Boss: bombard on cooldown. Elite: often. Crowd: occasionally. Show: every 8s.
+      if (hasBoss || hasElite || crowd || (state.frame % 480 === 0 && state.enemies.length > 0)) {
         activateBombardment();
       }
     }
