@@ -222,6 +222,7 @@
   var state = {
     player: null,
     bullets: [],
+    followerBullets: [],
     enemyBullets: [],
     enemies: [],
     orbs: [],
@@ -357,11 +358,11 @@
   });
 
   // ===================== Player =====================
-  function makePlayer() { return { x: W/2, y: H-60, w: 28, h: 34 }; }
+  function makePlayer() { return { x: W/2, y: H-60, w: 28, h: 34, speed: 3.5 }; }
 
   // ===================== Attack Patterns =====================
   function getAttackPattern(level) {
-    var spd = 9.5;
+    var spd = 7.5;
     if (level <= 0) return [{ ox: 0, dx: 0, dy: -spd }];
 
     if (level === 1) return [
@@ -405,12 +406,12 @@
 
   // ===================== Enemy Type Config =====================
   var ENEMY_TYPES = [
-    { id: 'basic',   minScore: 0,   hp: 1, speed: [0.8, 1.8], size: [14, 24], weight: 45, color: 'red' },
-    { id: 'fast',    minScore: 100, hp: 1, speed: [2.2, 3.8], size: [10, 16], weight: 22, color: 'orange' },
-    { id: 'tank',    minScore: 200, hp: 3, speed: [0.5, 1.0], size: [26, 36], weight: 15, color: 'darkred' },
-    { id: 'shooter', minScore: 300, hp: 1, speed: [0.8, 1.5], size: [16, 24], weight: 18, color: 'magenta' },
-    { id: 'waver',   minScore: 400, hp: 1, speed: [0.9, 1.6], size: [14, 22], weight: 16, color: 'cyan' },
-    { id: 'splitter',minScore: 500, hp: 2, speed: [0.8, 1.5], size: [18, 26], weight: 12, color: 'green' },
+    { id: 'basic',   minScore: 0,   hp: 1, speed: [0.5, 1.2], size: [14, 24], weight: 45, color: 'red' },
+    { id: 'fast',    minScore: 100, hp: 1, speed: [1.5, 2.8], size: [10, 16], weight: 22, color: 'orange' },
+    { id: 'tank',    minScore: 200, hp: 3, speed: [0.3, 0.7], size: [26, 36], weight: 15, color: 'darkred' },
+    { id: 'shooter', minScore: 300, hp: 1, speed: [0.5, 1.0], size: [16, 24], weight: 18, color: 'magenta' },
+    { id: 'waver',   minScore: 400, hp: 1, speed: [0.6, 1.1], size: [14, 22], weight: 16, color: 'cyan' },
+    { id: 'splitter',minScore: 500, hp: 2, speed: [0.5, 1.0], size: [18, 26], weight: 12, color: 'green' },
   ];
 
   function getEnemyPool() {
@@ -496,7 +497,7 @@
       x: Math.random() * (W - size * 2) + size,
       y: -size - 10,
       w: size, h: size,
-      speed: 0.6 + Math.min(level, 8) * 0.12,
+      speed: 0.4 + Math.min(level, 8) * 0.08,
       type: 'elite',
       hp: hp, maxHp: hp,
       color: 'purple',
@@ -521,7 +522,7 @@
       w: 80 + Math.min(level, 10) * 6,
       h: 60 + Math.min(level, 10) * 4,
       hp: hp, maxHp: hp,
-      speed: 1.5 + Math.min(level, 5) * 0.2,
+      speed: 1.0 + Math.min(level, 5) * 0.15,
       dir: 1,
       state: 'entering',
       targetY: 70,
@@ -824,6 +825,7 @@
     for (var k in keys) keys[k] = false;
     state.player = makePlayer();
     state.bullets = [];
+    state.followerBullets = [];
     state.enemyBullets = [];
     state.enemies = [];
     state.orbs = [];
@@ -862,15 +864,15 @@
       var dy = touchY - p.y;
       var dist = Math.sqrt(dx*dx + dy*dy);
       if (dist > 5) {
-        var moveSpd = Math.min(7, dist * 0.15 + 3);
+        var moveSpd = Math.min(5, dist * 0.12 + 2.5);
         p.x += (dx / dist) * moveSpd;
         p.y += (dy / dist) * moveSpd;
       }
     } else {
-      if (keys['ArrowLeft'] || keys['a'] || keys['A']) p.x -= 5;
-      if (keys['ArrowRight'] || keys['d'] || keys['D']) p.x += 5;
-      if (keys['ArrowUp'] || keys['w'] || keys['W']) p.y -= 5;
-      if (keys['ArrowDown'] || keys['s'] || keys['S']) p.y += 5;
+      if (keys['ArrowLeft'] || keys['a'] || keys['A']) p.x -= p.speed;
+      if (keys['ArrowRight'] || keys['d'] || keys['D']) p.x += p.speed;
+      if (keys['ArrowUp'] || keys['w'] || keys['W']) p.y -= p.speed;
+      if (keys['ArrowDown'] || keys['s'] || keys['S']) p.y += p.speed;
     }
     // Clamp
     if (p.x < p.w/2) p.x = p.w/2;
@@ -890,7 +892,7 @@
     }
 
     // --- Spawn enemies (dynamic rate based on score) ---
-    var spawnInterval = Math.max(18, 50 - Math.floor(state.score / 40));
+    var spawnInterval = Math.max(25, 65 - Math.floor(state.score / 50));
     if (state.frame % spawnInterval === 0) spawnEnemy();
 
     // --- Yellow orb spawn ---
@@ -919,14 +921,16 @@
     // --- Follower update ---
     for (var i = 0; i < state.followers.length; i++) {
       var f = state.followers[i];
-      f.angle += f.orbitSpeed;
+      f.angle += f.orbitSpeed * 0.7;
       f.x = state.player.x + Math.cos(f.angle) * f.orbitRadius;
       f.y = state.player.y + Math.sin(f.angle) * f.orbitRadius;
-      // Follower shoots
+      // Follower barrage shooting
       f.shootTimer--;
       if (f.shootTimer <= 0) {
-        var fireRate = Math.max(10, 40 - f.level * 6);
-        // Find nearest enemy
+        var fireRate = Math.max(20, 50 - f.level * 4);
+        var bulletCount = Math.min(5, 1 + Math.floor(f.level * 0.7));
+        var spread = 0.2 + f.level * 0.05;
+        // Find nearest enemy for aim direction
         var nearest = null, nearDist = Infinity;
         for (var ei = 0; ei < state.enemies.length; ei++) {
           var dx = state.enemies[ei].x - f.x;
@@ -934,18 +938,26 @@
           var d = Math.sqrt(dx*dx + dy*dy);
           if (d < nearDist) { nearDist = d; nearest = state.enemies[ei]; }
         }
-        var aimX = nearest ? nearest.x : f.x;
-        var aimY = nearest ? (nearest.y + nearest.h/2) : f.y - 100;
-        var dx = aimX - f.x, dy = aimY - f.y;
-        var len = Math.sqrt(dx*dx + dy*dy);
-        if (len > 0 && state.bullets.length < 60) {
-          state.bullets.push({
-            x: f.x, y: f.y,
-            vx: dx/len * 8, vy: dy/len * 8,
-            w: 3, h: 6
-          });
+        var baseAngle;
+        if (nearest) {
+          baseAngle = Math.atan2(nearest.y - f.y, nearest.x - f.x);
+        } else {
+          baseAngle = -Math.PI/2; // shoot up if no enemies
         }
-        f.shootTimer = fireRate + Math.floor(Math.random() * 10);
+        var bulletSpeed = 5.5;
+        for (var j = 0; j < bulletCount; j++) {
+          var offset = (j - (bulletCount-1)/2) * spread;
+          var angle = baseAngle + offset + (Math.random() - 0.5) * 0.1;
+          if (state.followerBullets.length < 40) {
+            state.followerBullets.push({
+              x: f.x, y: f.y,
+              vx: Math.cos(angle) * bulletSpeed,
+              vy: Math.sin(angle) * bulletSpeed,
+              w: 3, h: 5
+            });
+          }
+        }
+        f.shootTimer = fireRate + Math.floor(Math.random() * 15);
       }
     }
 
@@ -976,6 +988,16 @@
       eb.y += eb.vy;
       if (eb.y > H + 20 || eb.y < -20 || eb.x < -20 || eb.x > W + 20) {
         state.enemyBullets.splice(i, 1);
+      }
+    }
+
+    // --- Move follower bullets ---
+    for (var i = state.followerBullets.length - 1; i >= 0; i--) {
+      var fb = state.followerBullets[i];
+      fb.x += fb.vx;
+      fb.y += fb.vy;
+      if (fb.y > H + 20 || fb.y < -20 || fb.x < -20 || fb.x > W + 20) {
+        state.followerBullets.splice(i, 1);
       }
     }
 
@@ -1196,6 +1218,58 @@
       }
     }
 
+    // --- Follower Bullets vs Enemies ---
+    for (var i = state.followerBullets.length - 1; i >= 0; i--) {
+      var fb = state.followerBullets[i];
+      var hit = false;
+      for (var j = state.enemies.length - 1; j >= 0; j--) {
+        var e = state.enemies[j];
+        if (fb.x > e.x - e.w/2 && fb.x < e.x + e.w/2 &&
+            fb.y > e.y - e.h/2 && fb.y < e.y + e.h/2) {
+          e.hp--;
+          if (e.hp <= 0) {
+            spawnExplosion(e.x, e.y, e.w, e.type === 'elite' ? 'purple' : 'cyan');
+            if (e.type === 'splitter') {
+              spawnSplitMinion(e.x, e.y);
+              spawnSplitMinion(e.x, e.y);
+            }
+            dropOrb(e.x, e.y, e.type === 'elite' ? 'elite' : e.type);
+            addKillScore(e.type === 'tank' ? 20 : (e.type === 'splitter' ? 15 : 10));
+            state.enemies.splice(j, 1);
+          } else {
+            e.flash = 4;
+          }
+          state.followerBullets.splice(i, 1);
+          hit = true;
+          break;
+        }
+      }
+      if (hit) continue;
+      // Followers vs boss
+      if (state.boss) {
+        var boss = state.boss;
+        if (fb.x > boss.x - boss.w/2 && fb.x < boss.x + boss.w/2 &&
+            fb.y > boss.y - boss.h/2 && fb.y < boss.y + boss.h/2) {
+          boss.hp--;
+          boss.flash = 3;
+          if (boss.hp <= 0) {
+            spawnExplosion(boss.x, boss.y, boss.w, 'boss');
+            for (var k = 0; k < 5; k++) {
+              (function() { var delay = k; setTimeout(function() {
+                if (!state.gameOver) spawnExplosion(
+                  boss.x + (Math.random()-0.5)*60, boss.y + (Math.random()-0.5)*40, boss.w/2, 'boss'
+                );
+              }, delay * 100); })();
+            }
+            dropOrb(boss.x, boss.y, 'boss');
+            addKillScore(200);
+            state.boss = null;
+          }
+          state.followerBullets.splice(i, 1);
+        }
+      }
+    }
+
     // --- Player damage helper: shield -> follower -> life ---
     function playerTakeDamage() {
       if (state.invincible > 0) return false;
@@ -1412,6 +1486,25 @@
     }
     ctx.shadowBlur = 0;
 
+    // --- Follower bullets (cyan barrage) ---
+    for (var i = 0; i < state.followerBullets.length; i++) {
+      var fb = state.followerBullets[i];
+      ctx.shadowColor = '#66ffcc';
+      ctx.shadowBlur = 4;
+      ctx.fillStyle = '#66ffcc';
+      ctx.beginPath();
+      ctx.arc(fb.x, fb.y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      // Trail
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = '#33cc99';
+      ctx.beginPath();
+      ctx.arc(fb.x - fb.vx * 0.5, fb.y - fb.vy * 0.5, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.shadowBlur = 0;
+
     // --- Enemy bullets ---
     ctx.fillStyle = '#ff6644';
     ctx.shadowColor = '#ff4400';
@@ -1462,23 +1555,24 @@
       ctx.restore();
     }
 
-    // --- Shield visual ---
+    // --- Shield visual (faint, doesn't cover player) ---
     if (state.shield > 0 && !state.gameOver) {
       var p = state.player;
-      var shieldPulse = 1 + 0.08 * Math.sin(state.frame * 0.06);
+      var pulse = 1 + 0.06 * Math.sin(state.frame * 0.04);
       ctx.save();
-      ctx.strokeStyle = 'rgba(68, 221, 255, ' + (0.3 + 0.15 * Math.sin(state.frame * 0.05)) + ')';
-      ctx.lineWidth = 2;
-      ctx.shadowColor = '#44ddff';
-      ctx.shadowBlur = 15;
+      ctx.strokeStyle = 'rgba(68, 221, 255, 0.12)';
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = 'rgba(68, 221, 255, 0.3)';
+      ctx.shadowBlur = 8;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 24 * shieldPulse, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, 22 * pulse, 0, Math.PI * 2);
       ctx.stroke();
       ctx.shadowBlur = 0;
-      ctx.fillStyle = 'rgba(68, 221, 255, 0.06)';
+      ctx.strokeStyle = 'rgba(68, 221, 255, 0.06)';
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 24 * shieldPulse, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.arc(p.x, p.y, 24 * pulse, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.restore();
     }
 
