@@ -726,11 +726,63 @@
     };
   }
 
-  function spawnEnemyBullet(x, y, vx, vy) {
+  function spawnEnemyBullet(x, y, vx, vy, opts) {
     var maxBullets = isMobile ? 50 : 70;
     if (state.enemyBullets.length >= maxBullets) return;
+    opts = opts || {};
     playSFX('enemyShoot');
-    state.enemyBullets.push({ x: x, y: y, vx: vx, vy: vy, w: 6, h: 6 });
+    state.enemyBullets.push({ x:x, y:y, vx:vx, vy:vy, w:opts.w||6, h:opts.h||6, type:opts.type||'normal', t:0, p:opts.p||null });
+  }
+
+  // Special bullet types
+  function spawnLargeBullet(x, y, vx, vy) {
+    spawnEnemyBullet(x, y, vx, vy, { w:16, h:16, type:'large' });
+  }
+  function spawnLaser(x, y, vx, vy) {
+    spawnEnemyBullet(x, y, vx, vy, { w:5, h:35, type:'laser' });
+  }
+  function spawnOrbitBullet(cx, cy, radius, angle, speed) {
+    if (state.enemyBullets.length >= (isMobile ? 50 : 70)) return;
+    var x = cx + Math.cos(angle) * radius, y = cy + Math.sin(angle) * radius;
+    state.enemyBullets.push({ x:x, y:y, vx:0, vy:0, w:9, h:9, type:'orbit', t:0,
+      p:{cx:cx, cy:cy, r:radius, a:angle, spd:speed} });
+  }
+
+  // Formations
+  function spawnHeartFormation() {
+    if (state.enemies.length >= (isMobile ? 18 : 25)) return;
+    var t = 0, pts = [];
+    while (t < Math.PI * 2) {
+      var x = 16 * Math.pow(Math.sin(t), 3);
+      var y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+      pts.push({ x: Math.round(x*8), y: Math.round(y*8) });
+      t += 0.3;
+    }
+    var cx = W/2, cy = -30;
+    for (var i = 0; i < pts.length; i++) {
+      state.enemies.push({
+        x: cx + pts[i].x, y: cy + pts[i].y,
+        w: 10, h: 10, speed: 0.8 + Math.random()*0.3,
+        type: 'heart', hp:1, maxHp:1, color:'pink',
+        timer:i*2, oscPhase:0, oscSpeed:0, oscRange:0, baseX:0,
+        shootTimer:999, flash:0
+      });
+    }
+  }
+  function spawnSidePincer() {
+    if (state.enemies.length >= (isMobile ? 18 : 25)) return;
+    var count = 3 + Math.floor(Math.random()*2);
+    for (var i = 0; i < count; i++) {
+      for (var side = -1; side <= 1; side += 2) {
+        state.enemies.push({
+          x: (side === -1 ? -20 : W+20), y: 50 + i*60 + Math.random()*20,
+          w: 12, h: 12, speed: 1.0 + Math.random()*0.5,
+          type: 'pincer', hp:1, maxHp:1, color:'magenta',
+          timer:0, oscPhase:0, oscSpeed:0.03, oscRange:40, baseX:0,
+          shootTimer:20 + i*8, flash:0, side:side
+        });
+      }
+    }
   }
 
   function spawnOrb(type, x, y) {
@@ -1221,6 +1273,10 @@
     var spawnInterval = Math.max(minInterval, Math.round((50 - Math.floor(state.score / 60)) / (state.speedMul * state.timeScale) / dirMul));
     if (state.frame % spawnInterval === 0) spawnEnemy();
 
+    // --- Formations (periodic spectacles) ---
+    if (state.frame % 600 === 0 && state.score > 200) spawnHeartFormation();
+    if (state.frame % 450 === 0 && state.score > 500) spawnSidePincer();
+
     // --- Yellow orb spawn ---
     state.yellowTimer++;
     if (state.yellowTimer >= 400 + Math.floor(Math.random() * 200)) {
@@ -1324,9 +1380,19 @@
     // --- Move enemy bullets ---
     for (var i = state.enemyBullets.length - 1; i >= 0; i--) {
       var eb = state.enemyBullets[i];
-      eb.x += eb.vx * state.speedMul * state.timeScale;
-      eb.y += eb.vy * state.speedMul * state.timeScale;
-      if (eb.y > H + 20 || eb.y < -20 || eb.x < -20 || eb.x > W + 20) {
+      eb.t = (eb.t || 0) + 1;
+      if (eb.type === 'orbit') {
+        var p = eb.p; if (!p) { state.enemyBullets.splice(i,1); continue; }
+        p.a += p.spd * state.speedMul * state.timeScale;
+        eb.x = p.cx + Math.cos(p.a) * p.r;
+        eb.y = p.cy + Math.sin(p.a) * p.r;
+        // Despawn after full rotation
+        if (eb.t > 300) { state.enemyBullets.splice(i,1); continue; }
+      } else {
+        eb.x += eb.vx * state.speedMul * state.timeScale;
+        eb.y += eb.vy * state.speedMul * state.timeScale;
+      }
+      if (eb.y > H + 30 || eb.y < -30 || eb.x < -30 || eb.x > W + 30) {
         state.enemyBullets.splice(i, 1);
       }
     }
@@ -1346,7 +1412,22 @@
       var e = state.enemies[i];
       e.timer++;
 
-      if (e.type === 'elite') {
+      if (e.type === 'heart') {
+        e.y += e.speed * state.speedMul * state.timeScale;
+        e.x += Math.sin(state.frame * 0.02 + e.timer) * 0.5;
+        if (e.y > H + 20) { state.enemies.splice(i,1); continue; }
+      } else if (e.type === 'pincer') {
+        e.x += e.side * e.speed * state.speedMul * state.timeScale;
+        e.y += Math.sin(state.frame * e.oscSpeed + e.oscPhase) * 0.8;
+        e.shootTimer--;
+        if (e.shootTimer <= 0 && e.x > 0 && e.x < W) {
+          var px = state.player.x - e.x, py = state.player.y - e.y;
+          var len = Math.sqrt(px*px+py*py);
+          if (len > 0) spawnEnemyBullet(e.x, e.y, px/len*2.5, py/len*2.5);
+          e.shootTimer = 30 + Math.floor(Math.random()*20);
+        }
+        if (e.x < -40 || e.x > W+40) { state.enemies.splice(i,1); continue; }
+      } else if (e.type === 'elite') {
         e.x = e.baseX + Math.sin(state.frame * e.oscSpeed) * e.oscRange;
         e.y += e.speed * state.speedMul * state.timeScale;
         e.shootTimer--;
@@ -1426,50 +1507,50 @@
         if (boss.x < boss.w/2) boss.dir = 1;
         boss.y = boss.targetY + Math.sin(state.frame * 0.025) * (10 + boss.phase * 4);
 
-        // Boss shoot
+        // Boss shoot — fewer, larger, more patterned
         boss.shootTimer--;
         if (boss.shootTimer <= 0) {
           if (boss.phase === 1) {
-            // Phase 1: spread + aimed
-            for (var a = -2; a <= 2; a++) {
-              var angle = Math.PI/2 + a * 0.25;
-              spawnEnemyBullet(boss.x + Math.cos(angle) * 20, boss.y + boss.h/2,
-                Math.cos(angle) * 3, Math.sin(angle) * 3);
+            // Phase 1: large slow fan (3 big bullets)
+            for (var a = -1; a <= 1; a++) {
+              var angle = Math.PI/2 + a * 0.2;
+              spawnLargeBullet(boss.x, boss.y + boss.h/2, Math.cos(angle)*2, Math.sin(angle)*2);
             }
-            var px = state.player.x - boss.x;
-            var py = state.player.y - boss.y;
-            var len = Math.sqrt(px*px + py*py);
-            if (len > 0) spawnEnemyBullet(boss.x, boss.y + boss.h/2, px/len * 4, py/len * 4);
-            boss.shootTimer = 35 + Math.floor(Math.random() * 15);
+            boss.shootTimer = 45;
           } else if (boss.phase === 2) {
-            // Phase 2: faster spread + double aimed
-            for (var a = -3; a <= 3; a++) {
-              if (a === 0) continue;
-              var angle = Math.PI/2 + a * 0.18;
-              spawnEnemyBullet(boss.x + Math.cos(angle) * 20, boss.y + boss.h/2,
-                Math.cos(angle) * 3.2, Math.sin(angle) * 3.2);
-            }
-            for (var s = -1; s <= 1; s += 2) {
-              var px = state.player.x - boss.x + s * 30;
-              var py = state.player.y - boss.y;
-              var len = Math.sqrt(px*px + py*py);
-              if (len > 0) spawnEnemyBullet(boss.x + s*15, boss.y + boss.h/2, px/len * 4.5, py/len * 4.5);
-            }
-            boss.shootTimer = 28 + Math.floor(Math.random() * 12);
-          } else {
-            // Phase 3: chaotic - spiral burst
+            // Phase 2: alternating lasers + large bullets
             boss.patternTimer++;
-            for (var a = -4; a <= 4; a++) {
-              var angle = Math.PI/2 + a * 0.15 + boss.patternTimer * 0.05;
-              spawnEnemyBullet(boss.x + Math.cos(angle) * 20, boss.y + boss.h/2,
-                Math.cos(angle) * 3.5, Math.sin(angle) * 3.5);
+            if (boss.patternTimer % 2 === 0) {
+              // Laser sweep
+              for (var a = -1; a <= 1; a+=2) {
+                var angle = Math.PI/2 + a * 0.15;
+                spawnLaser(boss.x + a*30, boss.y, Math.cos(angle)*3.5, Math.sin(angle)*3.5);
+              }
+            } else {
+              // Large circle burst
+              for (var a = 0; a < 8; a++) {
+                var angle = a * Math.PI/4 + boss.patternTimer * 0.1;
+                spawnLargeBullet(boss.x, boss.y + boss.h/2, Math.cos(angle)*2.5, Math.sin(angle)*2.5);
+              }
             }
-            // Plus aimed
-            var px = state.player.x - boss.x;
-            var py = state.player.y - boss.y;
-            var len = Math.sqrt(px*px + py*py);
-            if (len > 0) spawnEnemyBullet(boss.x, boss.y + boss.h/2, px/len * 5, py/len * 5);
-            boss.shootTimer = 22 + Math.floor(Math.random() * 10);
+            boss.shootTimer = 40;
+          } else {
+            // Phase 3: orbit ring + lasers
+            boss.patternTimer++;
+            // Orbit ring (rotating)
+            if (boss.patternTimer % 15 === 0) {
+              for (var a = 0; a < 6; a++) {
+                var angle = a * Math.PI/3 + boss.patternTimer * 0.05;
+                spawnOrbitBullet(boss.x, boss.y, 40 + a*8, angle, 0.03 + a*0.005);
+              }
+            }
+            // Occasional laser
+            if (boss.patternTimer % 30 === 0) {
+              var px = state.player.x - boss.x, py = state.player.y - boss.y;
+              var len = Math.sqrt(px*px+py*py);
+              if (len > 0) spawnLaser(boss.x, boss.y+boss.h/2, px/len*4, py/len*4);
+            }
+            boss.shootTimer = 20;
           }
         }
 
@@ -1921,17 +2002,39 @@
     }
     ctx.shadowBlur = 0;
 
-    // --- Enemy bullets ---
-    ctx.fillStyle = '#ff6644';
-    ctx.shadowColor = '#ff4400';
-    ctx.shadowBlur = 8;
+    // --- Enemy bullets (types: normal, large, laser, orbit) ---
     for (var i = 0; i < state.enemyBullets.length; i++) {
       var eb = state.enemyBullets[i];
-      ctx.beginPath();
-      ctx.arc(eb.x, eb.y, 4, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.save();
+      if (eb.type === 'large') {
+        ctx.shadowColor = '#ff8800'; ctx.shadowBlur = 18;
+        ctx.fillStyle = '#ff6633';
+        ctx.beginPath(); ctx.arc(eb.x, eb.y, 8, 0, Math.PI*2); ctx.fill();
+        ctx.shadowBlur = 0; ctx.fillStyle = '#ffcc66';
+        ctx.beginPath(); ctx.arc(eb.x-2, eb.y-2, 3, 0, Math.PI*2); ctx.fill();
+      } else if (eb.type === 'laser') {
+        ctx.shadowColor = '#ff00ff'; ctx.shadowBlur = 15;
+        var grad = ctx.createLinearGradient(eb.x, eb.y-eb.h/2, eb.x, eb.y+eb.h/2);
+        grad.addColorStop(0, 'rgba(255,100,255,0)');
+        grad.addColorStop(0.2, '#ff66ff');
+        grad.addColorStop(0.5, '#ffffff');
+        grad.addColorStop(0.8, '#ff66ff');
+        grad.addColorStop(1, 'rgba(255,100,255,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(eb.x - eb.w/2, eb.y - eb.h/2, eb.w, eb.h);
+      } else if (eb.type === 'orbit') {
+        ctx.shadowColor = '#66ffcc'; ctx.shadowBlur = 12;
+        ctx.fillStyle = '#66ffcc';
+        ctx.beginPath(); ctx.arc(eb.x, eb.y, 5, 0, Math.PI*2); ctx.fill();
+        ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.beginPath(); ctx.arc(eb.x-1.5, eb.y-1.5, 2, 0, Math.PI*2); ctx.fill();
+      } else {
+        ctx.shadowColor = '#ff4400'; ctx.shadowBlur = 8;
+        ctx.fillStyle = '#ff6644';
+        ctx.beginPath(); ctx.arc(eb.x, eb.y, 4, 0, Math.PI*2); ctx.fill();
+      }
+      ctx.restore();
     }
-    ctx.shadowBlur = 0;
 
     // --- Enemies ---
     for (var i = 0; i < state.enemies.length; i++) {
@@ -2353,6 +2456,27 @@
       ctx.fillRect(cx - hw, cy - hh - 8, hw*2 * hpPct, 4);
       ctx.shadowBlur = 0;
       return;
+    } else if (e.type === 'heart') {
+      // Heart formation: pink dots
+      ctx.shadowColor = '#ff6699'; ctx.shadowBlur = 6;
+      ctx.fillStyle = e.flash ? '#ffffff' : '#ff4499';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + hh*0.3);
+      ctx.bezierCurveTo(cx-hw*1.2, cy-hh*0.5, cx-hw*0.4, cy-hh*1.2, cx, cy-hh*0.3);
+      ctx.bezierCurveTo(cx+hw*0.4, cy-hh*1.2, cx+hw*1.2, cy-hh*0.5, cx, cy+hh*0.3);
+      ctx.fill();
+      ctx.shadowBlur = 0; return;
+    } else if (e.type === 'pincer') {
+      // Side pincer: arrow shape
+      ctx.shadowColor = '#ff44aa'; ctx.shadowBlur = 6;
+      ctx.fillStyle = e.flash ? '#ffffff' : '#cc33aa';
+      ctx.beginPath();
+      ctx.moveTo(cx - e.side*hw, cy);
+      ctx.lineTo(cx + e.side*hw*0.3, cy - hh);
+      ctx.lineTo(cx + e.side*hw*0.3, cy);
+      ctx.lineTo(cx + e.side*hw*0.3, cy + hh);
+      ctx.closePath(); ctx.fill();
+      ctx.shadowBlur = 0; return;
     }
 
     // Flash white on hit
