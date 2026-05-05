@@ -192,15 +192,15 @@
       <span class="atk-label">⚡火力</span>
       <span class="atk-pips" id="atkPips"></span>
     </div>
-    <span><span id="shieldDisplay"></span><span id="livesDisplay">❤❤❤</span></span>
+    <span><span id="autoDisplay"></span><span id="shieldDisplay"></span><span id="livesDisplay">❤❤❤</span></span>
   </div>
   <div class="canvas-wrap" id="canvasWrap">
     <canvas id="gameCanvas" width="800" height="600"></canvas>
     <div id="touchIndicator"></div>
   </div>
   <div class="controls">
-    <span class="desktop-only"><kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> 或 <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> 移动 &nbsp;|&nbsp;</span>
-    <kbd>R</kbd> 重新开始 &nbsp;|&nbsp;
+    <span class="desktop-only"><kbd>↑↓←→</kbd> / <kbd>WASD</kbd> 移动 &nbsp;|&nbsp;</span>
+    <kbd>E</kbd> 轰炸 &nbsp; <kbd>Q</kbd> 托管 &nbsp; <kbd>R</kbd> 重开 &nbsp;|&nbsp;
     <button class="restart-btn" id="restartBtn">✈ 重新开始</button>
   </div>
 </div>
@@ -244,6 +244,8 @@
     shield: 0,
     skillCooldown: 0,
     skillReady: false,
+    autoPlay: false,
+    flashOverlay: null,
     levelUpText: 0,
     running: true
   };
@@ -253,6 +255,8 @@
   window.addEventListener('keydown', function(e) {
     keys[e.key] = true;
     if (e.key === 'r' || e.key === 'R') restartGame();
+    if (e.key === 'q' || e.key === 'Q') { state.autoPlay = !state.autoPlay; updateUI(); }
+    if (e.key === 'e' || e.key === 'E') { activateBombardment(); keys['e'] = false; keys['E'] = false; }
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
         e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ') e.preventDefault();
   });
@@ -295,7 +299,7 @@
 
     // Multi-touch: second finger triggers skill
     if (touchActive || state.touchCount > 0) {
-      activateShockwave();
+      activateBombardment();
       return;
     }
 
@@ -639,100 +643,80 @@
     }
   }
 
-  // ===================== Skill: Shockwave =====================
-  function activateShockwave() {
+  // ===================== Skill: Full-Screen Bombardment =====================
+  function activateBombardment() {
     if (state.skillCooldown > 0) return;
-    state.skillCooldown = 180; // 3 seconds
+    state.skillCooldown = 300; // 5 seconds
     state.skillReady = false;
 
     var cx = state.player.x, cy = state.player.y;
 
-    // Visual: big expanding ring
-    state.particles.push({
-      x: cx, y: cy, vx: 0, vy: 0,
-      life: 30, maxLife: 30,
-      size: 3, r: 150, g: 220, b: 255,
-      isRing: true, ringRadius: 0
-    });
+    // Screen flash
+    state.flashOverlay = { r: 255, g: 200, b: 255, life: 15, maxLife: 15 };
 
-    // Second ring
-    state.particles.push({
-      x: cx, y: cy, vx: 0, vy: 0,
-      life: 25, maxLife: 25,
-      size: 2, r: 255, g: 255, b: 255,
-      isRing: true, ringRadius: 0
-    });
-
-    // Burst particles
-    for (var i = 0; i < 40; i++) {
-      var angle = Math.random() * Math.PI * 2;
-      var spd = 3 + Math.random() * 6;
+    // Falling bomb particles from top of screen
+    for (var i = 0; i < 60; i++) {
+      var bx = Math.random() * W;
+      var by = -20 - Math.random() * 100;
       state.particles.push({
-        x: cx, y: cy,
-        vx: Math.cos(angle) * spd, vy: Math.sin(angle) * spd,
-        life: 15 + Math.random() * 15, maxLife: 30,
-        size: 2 + Math.random() * 3,
-        r: 100 + Math.floor(Math.random() * 155),
-        g: 200 + Math.floor(Math.random() * 55),
-        b: 255, isRing: false
+        x: bx, y: by,
+        vx: (Math.random() - 0.5) * 2,
+        vy: 4 + Math.random() * 6,
+        life: 25 + Math.random() * 20, maxLife: 45,
+        size: 2 + Math.random() * 4,
+        r: 255, g: 180 + Math.floor(Math.random() * 75), b: 100,
+        isRing: false
       });
     }
 
-    // Damage enemies in range
-    var shockRadius = 180;
-    for (var i = state.enemies.length - 1; i >= 0; i--) {
-      var e = state.enemies[i];
-      var dx = e.x - cx, dy = e.y - cy;
-      var dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < shockRadius) {
-        var dmg = 2;
-        e.hp -= dmg;
-        // Push enemy away
-        if (dist > 1) {
-          e.x += (dx / dist) * 40;
-          e.y += (dy / dist) * 40;
-        }
-        if (e.hp <= 0) {
-          spawnExplosion(e.x, e.y, e.w, e.type === 'elite' ? 'purple' : 'orange');
-          dropOrb(e.x, e.y, e.type === 'elite' ? 'elite' : e.type);
-          addKillScore(e.type === 'tank' ? 20 : (e.type === 'splitter' ? 15 : 10));
-          state.enemies.splice(i, 1);
-        } else {
-          e.flash = 8;
-        }
-      }
-    }
+    // Expanding rings from center
+    state.particles.push({ x: cx, y: cy, vx: 0, vy: 0,
+      life: 40, maxLife: 40, size: 3, r: 255, g: 200, b: 255, isRing: true, ringRadius: 0 });
+    state.particles.push({ x: cx, y: cy, vx: 0, vy: 0,
+      life: 30, maxLife: 30, size: 2, r: 255, g: 255, b: 255, isRing: true, ringRadius: 0 });
 
-    // Destroy enemy bullets in range
+    // Clear ALL enemy bullets
     for (var i = state.enemyBullets.length - 1; i >= 0; i--) {
       var eb = state.enemyBullets[i];
-      var dx = eb.x - cx, dy = eb.y - cy;
-      if (Math.sqrt(dx*dx + dy*dy) < shockRadius) {
-        spawnExplosion(eb.x, eb.y, 8, 'blue');
-        state.enemyBullets.splice(i, 1);
+      spawnExplosion(eb.x, eb.y, 8, 'blue');
+    }
+    state.enemyBullets = [];
+
+    // Kill ALL minor enemies (non-elite, non-boss)
+    for (var i = state.enemies.length - 1; i >= 0; i--) {
+      var e = state.enemies[i];
+      if (e.type === 'elite') {
+        // Elite loses 6/7 of current HP
+        var newHp = Math.ceil(e.hp / 7);
+        e.hp = Math.max(1, newHp);
+        e.flash = 20;
+        spawnExplosion(e.x, e.y, e.w * 0.6, 'purple');
+      } else {
+        spawnExplosion(e.x, e.y, e.w, 'orange');
+        dropOrb(e.x, e.y, e.type);
+        addKillScore(e.type === 'tank' ? 20 : (e.type === 'splitter' ? 15 : 10));
+        state.enemies.splice(i, 1);
       }
     }
 
-    // Damage boss
+    // Boss loses half of current HP
     if (state.boss) {
       var boss = state.boss;
-      var dx = boss.x - cx, dy = boss.y - cy;
-      if (Math.sqrt(dx*dx + dy*dy) < shockRadius + boss.w/2) {
-        boss.hp -= 3;
-        boss.flash = 10;
-        if (boss.hp <= 0) {
-          spawnExplosion(boss.x, boss.y, boss.w, 'boss');
-          for (var k = 0; k < 5; k++) {
-            (function() { var delay = k; setTimeout(function() {
-              if (!state.gameOver) spawnExplosion(
-                boss.x + (Math.random()-0.5)*60, boss.y + (Math.random()-0.5)*40, boss.w/2, 'boss'
-              );
-            }, delay * 100); })();
-          }
-          dropOrb(boss.x, boss.y, 'boss');
-          addKillScore(200);
-          state.boss = null;
+      boss.hp = Math.ceil(boss.hp / 2);
+      boss.flash = 30;
+      spawnExplosion(boss.x, boss.y, boss.w * 0.5, 'boss');
+      if (boss.hp <= 0) {
+        spawnExplosion(boss.x, boss.y, boss.w, 'boss');
+        for (var k = 0; k < 5; k++) {
+          (function() { var delay = k; setTimeout(function() {
+            if (!state.gameOver) spawnExplosion(
+              boss.x + (Math.random()-0.5)*60, boss.y + (Math.random()-0.5)*40, boss.w/2, 'boss'
+            );
+          }, delay * 100); })();
         }
+        dropOrb(boss.x, boss.y, 'boss');
+        addKillScore(200);
+        state.boss = null;
       }
     }
   }
@@ -797,7 +781,8 @@
     var spawned = false;
     while (state.score >= state.eliteThreshold) {
       spawnElite(state.eliteThreshold);
-      state.eliteThreshold += 250;
+      var eliteIncrement = Math.max(80, 250 - Math.floor(state.score / 20) * 3);
+      state.eliteThreshold += eliteIncrement;
       spawned = true;
     }
     while (state.score >= state.bossThreshold) {
@@ -845,6 +830,8 @@
     state.shield = 0;
     state.skillCooldown = 0;
     state.skillReady = false;
+    state.autoPlay = false;
+    state.flashOverlay = null;
     state.levelUpText = 0;
     state.running = true;
     state.touchCount = 0;
@@ -857,9 +844,64 @@
     if (state.gameOver) return;
     state.frame++;
 
-    // --- Player movement (keyboard + touch) ---
+    // --- Player movement (auto-play / keyboard / touch) ---
     var p = state.player;
-    if (touchActive) {
+
+    if (state.autoPlay && !state.gameOver) {
+      // Auto-play AI: calculate safest direction
+      var threatX = 0, threatY = 0, hasThreat = false;
+      // Evaluate enemy bullets
+      for (var bi = 0; bi < state.enemyBullets.length; bi++) {
+        var eb = state.enemyBullets[bi];
+        var dx = eb.x - p.x, dy = eb.y - p.y;
+        var dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < 200 && dist > 0) {
+          var urgency = (200 - dist) / 200;
+          threatX -= (dx / dist) * urgency * 8;
+          threatY -= (dy / dist) * urgency * 8;
+          hasThreat = true;
+        }
+      }
+      // Move toward nearest enemy if safe
+      var targetX = W/2, targetY = H * 0.3;
+      var nearDist = Infinity;
+      for (var ei = 0; ei < state.enemies.length; ei++) {
+        var e = state.enemies[ei];
+        var dx = e.x - p.x, dy = e.y - p.y;
+        var d = Math.sqrt(dx*dx + dy*dy);
+        if (d < nearDist) { nearDist = d; targetX = e.x; targetY = e.y; }
+      }
+      var toTargetX = targetX - p.x, toTargetY = targetY - p.y;
+      var targetDist = Math.sqrt(toTargetX*toTargetX + toTargetY*toTargetY);
+
+      // Combine: flee threats + approach enemies
+      var moveX = 0, moveY = 0;
+      if (hasThreat) {
+        moveX = threatX;
+        moveY = threatY;
+      } else if (targetDist > 30) {
+        moveX = toTargetX / targetDist * 3;
+        moveY = toTargetY / targetDist * 3;
+      }
+      // Collect nearby orbs
+      for (var oi = 0; oi < state.orbs.length; oi++) {
+        var o = state.orbs[oi];
+        var dx = o.x - p.x, dy = o.y - p.y;
+        var d = Math.sqrt(dx*dx + dy*dy);
+        if (d < 150) {
+          moveX += (dx / d) * 2;
+          moveY += (dy / d) * 2;
+        }
+      }
+      // Clamp move speed to player speed
+      var moveLen = Math.sqrt(moveX*moveX + moveY*moveY);
+      if (moveLen > p.speed) {
+        moveX = moveX / moveLen * p.speed;
+        moveY = moveY / moveLen * p.speed;
+      }
+      p.x += moveX;
+      p.y += moveY;
+    } else if (touchActive) {
       var dx = touchX - p.x;
       var dy = touchY - p.y;
       var dist = Math.sqrt(dx*dx + dy*dy);
@@ -961,11 +1003,12 @@
       }
     }
 
-    // --- Skill activation (E key) ---
-    if (keys['e'] || keys['E']) {
-      keys['e'] = false;
-      keys['E'] = false;
-      activateShockwave();
+    // --- Auto-play: auto-use skill when many enemies ---
+    if (state.autoPlay && state.skillReady) {
+      var enemyCount = state.enemies.length + state.enemyBullets.length;
+      if (enemyCount > 10 || (state.boss && state.boss.hp > 0)) {
+        activateBombardment();
+      }
     }
 
     // --- Level up text timer ---
@@ -1576,9 +1619,9 @@
       ctx.roundRect(10, 10, 80, 8, 4);
       ctx.fill();
       if (state.skillReady) {
-        ctx.fillStyle = '#66ddff';
-        ctx.shadowColor = '#66ddff';
-        ctx.shadowBlur = 10;
+        ctx.fillStyle = '#ff88ff';
+        ctx.shadowColor = '#ff88ff';
+        ctx.shadowBlur = 12;
         ctx.roundRect(10, 10, 80, 8, 4);
         ctx.fill();
         ctx.shadowBlur = 0;
@@ -1586,13 +1629,24 @@
         ctx.font = '8px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('E / 双指触屏', 50, 14);
+        ctx.fillText('💣 轰炸', 50, 14);
       } else {
-        var pct = 1 - state.skillCooldown / 180;
-        ctx.fillStyle = '#4488aa';
+        var pct = 1 - state.skillCooldown / 300;
+        ctx.fillStyle = '#884488';
         ctx.roundRect(10, 10, 80 * pct, 8, 4);
         ctx.fill();
       }
+    }
+
+    // --- Auto-play indicator ---
+    if (state.autoPlay && !state.gameOver) {
+      ctx.fillStyle = 'rgba(0,200,100,0.15)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = 'rgba(0,255,150,0.5)';
+      ctx.font = 'bold 16px Arial';
+      ctx.fillText('🤖 AUTO', W - 12, 10);
     }
 
     // --- Level Up Text ---
@@ -1609,6 +1663,16 @@
       ctx.font = 'bold ' + Math.round(36 * scale) + 'px Arial, sans-serif';
       ctx.fillText('⚡ 火力升级!', W/2, H/2 - 80);
       ctx.restore();
+    }
+
+    // --- Screen flash overlay ---
+    if (state.flashOverlay) {
+      var fa = state.flashOverlay;
+      var alpha = fa.life / fa.maxLife;
+      ctx.fillStyle = 'rgba(' + fa.r + ',' + fa.g + ',' + fa.b + ',' + (alpha * 0.4) + ')';
+      ctx.fillRect(0, 0, W, H);
+      fa.life--;
+      if (fa.life <= 0) state.flashOverlay = null;
     }
 
     // --- Game Over ---
