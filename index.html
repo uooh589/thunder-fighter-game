@@ -128,7 +128,7 @@
 
   /* --- Mobile Responsive --- */
   @media (max-width: 840px) {
-    .game-wrapper { padding: 4px; gap: 6px; }
+    .game-wrapper { padding: 4px; gap: 4px; }
     .info-bar { font-size: 12px; padding: 0 2px; }
     .info-bar .atk-bar .atk-pip { width: 8px; height: 8px; }
     .info-bar .atk-bar .atk-label { font-size: 10px; }
@@ -136,11 +136,47 @@
     .controls kbd { font-size: 10px; padding: 1px 5px; }
     .restart-btn { font-size: 11px; padding: 4px 14px; }
   }
-  @media (max-width: 480px) {
-    .game-wrapper { padding: 2px; gap: 4px; }
-    .info-bar { font-size: 10px; }
-    .info-bar .atk-bar .atk-pip { width: 6px; height: 6px; gap: 2px; }
+  @media (max-width: 600px) {
+    body { align-items: stretch; padding: 0; }
+    .game-wrapper {
+      padding: 3px;
+      gap: 3px;
+      max-width: 100%;
+      height: 100dvh;
+      height: 100vh;
+      justify-content: flex-start;
+    }
+    .canvas-wrap {
+      flex: 1;
+      max-width: 100%;
+      min-height: 0;
+      aspect-ratio: auto;
+    }
+    .canvas-wrap canvas {
+      width: 100%;
+      height: 100%;
+      border-radius: 4px;
+      border-width: 1px;
+    }
+    .info-bar {
+      font-size: 10px;
+      flex-shrink: 0;
+      padding: 0 2px;
+    }
+    .info-bar .atk-bar .atk-pip { width: 6px; height: 6px; }
+    .controls {
+      font-size: 10px;
+      flex-shrink: 0;
+      line-height: 1.3;
+    }
+    .restart-btn { font-size: 10px; padding: 3px 10px; }
     .controls .desktop-only { display: none; }
+  }
+  @media (max-width: 400px) {
+    .game-wrapper { padding: 2px; gap: 2px; }
+    .info-bar { font-size: 9px; }
+    .controls { font-size: 9px; }
+    .restart-btn { font-size: 9px; padding: 2px 8px; }
   }
   @media (pointer: coarse) {
     canvas { cursor: default; }
@@ -203,6 +239,7 @@
     bossThreshold: 1000,
     yellowTimer: 0,
     boss: null,
+    levelUpText: 0,
     running: true
   };
 
@@ -354,6 +391,26 @@
     ];
   }
 
+  // ===================== Enemy Type Config =====================
+  var ENEMY_TYPES = [
+    { id: 'basic',   minScore: 0,   hp: 1, speed: [0.8, 1.8], size: [14, 24], weight: 45, color: 'red' },
+    { id: 'fast',    minScore: 100, hp: 1, speed: [2.2, 3.8], size: [10, 16], weight: 22, color: 'orange' },
+    { id: 'tank',    minScore: 200, hp: 3, speed: [0.5, 1.0], size: [26, 36], weight: 15, color: 'darkred' },
+    { id: 'shooter', minScore: 300, hp: 1, speed: [0.8, 1.5], size: [16, 24], weight: 18, color: 'magenta' },
+    { id: 'waver',   minScore: 400, hp: 1, speed: [0.9, 1.6], size: [14, 22], weight: 16, color: 'cyan' },
+    { id: 'splitter',minScore: 500, hp: 2, speed: [0.8, 1.5], size: [18, 26], weight: 12, color: 'green' },
+  ];
+
+  function getEnemyPool() {
+    var pool = [];
+    for (var i = 0; i < ENEMY_TYPES.length; i++) {
+      if (state.score >= ENEMY_TYPES[i].minScore) {
+        for (var w = 0; w < ENEMY_TYPES[i].weight; w++) pool.push(ENEMY_TYPES[i]);
+      }
+    }
+    return pool;
+  }
+
   // ===================== Entity Spawners =====================
   function spawnPlayerBullets() {
     if (state.bullets.length >= 50) return;
@@ -372,64 +429,96 @@
     }
   }
 
+  function pickEnemyType() {
+    var pool = getEnemyPool();
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
   function spawnEnemy() {
     if (state.enemies.length >= 25) return;
-    var size = 16 + Math.random() * 14;
+    var cfg = pickEnemyType();
+    var size = cfg.size[0] + Math.random() * (cfg.size[1] - cfg.size[0]);
+    var spd = cfg.speed[0] + Math.random() * (cfg.speed[1] - cfg.speed[0]);
     state.enemies.push({
       x: Math.random() * (W - size) + size/2,
       y: -size,
       w: size,
       h: size,
-      speed: 1.0 + Math.random() * 2.0,
-      type: 'normal',
-      hp: 1,
-      maxHp: 1,
+      speed: spd,
+      type: cfg.id,
+      hp: cfg.hp,
+      maxHp: cfg.hp,
+      color: cfg.color,
       timer: 0,
-      oscPhase: Math.random() * Math.PI * 2
+      oscPhase: Math.random() * Math.PI * 2,
+      oscSpeed: 0.03 + Math.random() * 0.02,
+      oscRange: 30 + Math.random() * 30,
+      baseX: 0,
+      shootTimer: 40 + Math.floor(Math.random() * 40),
+      flash: 0
+    });
+  }
+
+  function spawnSplitMinion(x, y) {
+    var size = 10 + Math.random() * 4;
+    var offX = (Math.random() - 0.5) * 20;
+    state.enemies.push({
+      x: x + offX, y: y,
+      w: size, h: size,
+      speed: 1.5 + Math.random(),
+      type: 'basic',
+      hp: 1, maxHp: 1,
+      color: 'green',
+      timer: 0, oscPhase: 0, oscSpeed: 0, oscRange: 0, baseX: 0,
+      shootTimer: 999,
+      flash: 0
     });
   }
 
   function spawnElite(milestone) {
     var level = milestone / 100;
-    var size = 24 + Math.min(level, 10) * 2;
-    var hp = 2 + Math.floor(level * 2);
+    var size = 26 + Math.min(level, 10) * 2;
+    var hp = 3 + Math.floor(level * 2);
+    var pattern = Math.floor(Math.random() * 3); // 0=aimed, 1=spread, 2=mixed
     state.enemies.push({
       x: Math.random() * (W - size * 2) + size,
       y: -size - 10,
-      w: size,
-      h: size,
-      speed: 0.8 + Math.min(level, 8) * 0.15,
+      w: size, h: size,
+      speed: 0.6 + Math.min(level, 8) * 0.12,
       type: 'elite',
-      hp: hp,
-      maxHp: hp,
-      timer: 0,
-      oscPhase: 0,
-      oscSpeed: 0.02 + Math.random() * 0.02,
+      hp: hp, maxHp: hp,
+      color: 'purple',
+      timer: 0, oscPhase: 0, oscSpeed: 0,
       oscRange: 50 + Math.min(level, 10) * 5,
-      baseX: 0, // set below
-      shootTimer: 30 + Math.floor(Math.random() * 30)
+      baseX: 0,
+      shootTimer: 40 + Math.floor(Math.random() * 20),
+      flash: 0,
+      pattern: pattern,
+      patternCounter: 0
     });
-    state.enemies[state.enemies.length - 1].baseX = state.enemies[state.enemies.length - 1].x;
+    var e = state.enemies[state.enemies.length - 1];
+    e.baseX = e.x;
+    e.oscSpeed = 0.018 + Math.random() * 0.015;
   }
 
   function spawnBoss(milestone) {
     var level = milestone / 1000;
-    var hp = 30 + Math.floor(level * 25);
+    var hp = 40 + Math.floor(level * 30);
     state.boss = {
-      x: W/2,
-      y: -70,
+      x: W/2, y: -70,
       w: 80 + Math.min(level, 10) * 6,
       h: 60 + Math.min(level, 10) * 4,
-      hp: hp,
-      maxHp: hp,
+      hp: hp, maxHp: hp,
       speed: 1.5 + Math.min(level, 5) * 0.2,
       dir: 1,
       state: 'entering',
       targetY: 70,
-      shootTimer: 60,
-      spawnTimer: 120,
+      shootTimer: 50,
+      spawnTimer: 150,
       level: level,
-      flash: 0
+      flash: 0,
+      phase: 1,
+      patternTimer: 0
     };
   }
 
@@ -440,9 +529,8 @@
 
   function spawnOrb(type, x, y) {
     if (state.orbs.length >= 15) return;
-    var size = 10;
     state.orbs.push({
-      x: x, y: y, w: size, h: size,
+      x: x, y: y, w: 10, h: 10,
       vy: 0.6 + Math.random() * 0.3,
       type: type,
       timer: Math.random() * 100
@@ -452,15 +540,46 @@
   function dropOrb(x, y, fromType) {
     if (fromType === 'elite') {
       spawnOrb('blue', x, y);
-      if (Math.random() < 0.5) spawnOrb('blue', x + (Math.random()-0.5)*20, y);
+      if (Math.random() < 0.55) spawnOrb('blue', x + (Math.random()-0.5)*20, y);
     } else if (fromType === 'boss') {
       var count = 4 + Math.floor(Math.random() * 3);
       for (var i = 0; i < count; i++) {
         spawnOrb('blue', x + (Math.random()-0.5)*40, y + (Math.random()-0.5)*20);
       }
+    } else if (fromType === 'tank' || fromType === 'splitter') {
+      if (Math.random() < 0.25) spawnOrb('blue', x, y);
     } else {
-      if (Math.random() < 0.12) spawnOrb('blue', x, y);
+      if (Math.random() < 0.10) spawnOrb('blue', x, y);
     }
+  }
+
+  // ===================== Level Up Effect =====================
+  function spawnLevelUpEffect(x, y) {
+    // Expanding ring
+    state.particles.push({
+      x: x, y: y, vx: 0, vy: 0,
+      life: 40, maxLife: 40,
+      size: 2, r: 102, g: 221, b: 255,
+      isRing: true, ringRadius: 0
+    });
+    // Big burst
+    for (var i = 0; i < 30; i++) {
+      var angle = Math.random() * Math.PI * 2;
+      var spd = 2 + Math.random() * 5;
+      state.particles.push({
+        x: x, y: y,
+        vx: Math.cos(angle) * spd,
+        vy: Math.sin(angle) * spd,
+        life: 25 + Math.random() * 20,
+        maxLife: 45,
+        size: 2 + Math.random() * 4,
+        r: 100 + Math.floor(Math.random() * 155),
+        g: 180 + Math.floor(Math.random() * 75),
+        b: 255,
+        isRing: false
+      });
+    }
+    state.levelUpText = 50; // show level up text for 50 frames
   }
 
   // ===================== Particles =====================
@@ -543,10 +662,11 @@
     state.gameOver = false;
     state.frame = 0;
     state.shootCooldown = 0;
-    state.eliteThreshold = 100;
+    state.eliteThreshold = 150;
     state.bossThreshold = 1000;
     state.yellowTimer = 0;
     state.boss = null;
+    state.levelUpText = 0;
     state.running = true;
     initStars();
     updateUI();
@@ -591,8 +711,9 @@
       state.shootCooldown--;
     }
 
-    // --- Spawn regular enemies ---
-    if (state.frame % 30 === 0) spawnEnemy();
+    // --- Spawn enemies (dynamic rate based on score) ---
+    var spawnInterval = Math.max(18, 50 - Math.floor(state.score / 40));
+    if (state.frame % spawnInterval === 0) spawnEnemy();
 
     // --- Yellow orb spawn ---
     state.yellowTimer++;
@@ -600,6 +721,9 @@
       state.yellowTimer = 0;
       spawnOrb('yellow', 30 + Math.random() * (W - 60), -10);
     }
+
+    // --- Level up text timer ---
+    if (state.levelUpText > 0) state.levelUpText--;
 
     // --- Move player bullets ---
     for (var i = state.bullets.length - 1; i >= 0; i--) {
@@ -624,32 +748,75 @@
     // --- Move enemies ---
     for (var i = state.enemies.length - 1; i >= 0; i--) {
       var e = state.enemies[i];
+      e.timer++;
+
       if (e.type === 'elite') {
         e.x = e.baseX + Math.sin(state.frame * e.oscSpeed) * e.oscRange;
         e.y += e.speed;
-        // Elite shoot back
         e.shootTimer--;
         if (e.shootTimer <= 0) {
-          var dx = state.player.x - e.x;
-          var dy = state.player.y - e.y;
-          var len = Math.sqrt(dx*dx + dy*dy);
+          var px = state.player.x - e.x;
+          var py = state.player.y - e.y;
+          var len = Math.sqrt(px*px + py*py);
           if (len > 0) {
-            var spd = 3;
-            spawnEnemyBullet(e.x, e.y + e.h/2, dx/len * spd, dy/len * spd);
+            if (e.pattern === 0) {
+              // Aimed
+              spawnEnemyBullet(e.x, e.y + e.h/2, px/len * 3, py/len * 3);
+            } else if (e.pattern === 1) {
+              // Spread
+              for (var a = -1; a <= 1; a++) {
+                var angle = Math.atan2(py, px) + a * 0.3;
+                spawnEnemyBullet(e.x, e.y + e.h/2, Math.cos(angle) * 3, Math.sin(angle) * 3);
+              }
+            } else {
+              // Alternating
+              e.patternCounter++;
+              if (e.patternCounter % 3 === 0) {
+                spawnEnemyBullet(e.x, e.y + e.h/2, px/len * 3.5, py/len * 3.5);
+              } else {
+                for (var a = -1; a <= 1; a++) {
+                  var angle = Math.atan2(py, px) + a * 0.25;
+                  spawnEnemyBullet(e.x, e.y + e.h/2, Math.cos(angle) * 2.5, Math.sin(angle) * 2.5);
+                }
+              }
+            }
           }
-          e.shootTimer = 50 + Math.floor(Math.random() * 40);
+          e.shootTimer = 45 + Math.floor(Math.random() * 30);
+        }
+      } else if (e.type === 'waver') {
+        e.x += Math.sin(state.frame * e.oscSpeed + e.oscPhase) * 2;
+        e.y += e.speed;
+      } else if (e.type === 'shooter') {
+        e.y += e.speed;
+        e.shootTimer--;
+        if (e.shootTimer <= 0 && e.y > 0 && e.y < H * 0.6) {
+          var px = state.player.x - e.x;
+          var py = state.player.y - e.y;
+          var len = Math.sqrt(px*px + py*py);
+          if (len > 0) {
+            spawnEnemyBullet(e.x, e.y + e.h/2, px/len * 2.2, py/len * 2.2);
+          }
+          e.shootTimer = 60 + Math.floor(Math.random() * 40);
         }
       } else {
         e.y += e.speed;
       }
+      // Remove off-screen
       if (e.y - e.h > H) {
         state.enemies.splice(i, 1);
       }
+      // Flash decay
+      if (e.flash > 0) e.flash--;
     }
 
     // --- Boss update ---
     if (state.boss) {
       var boss = state.boss;
+      // Phase transitions based on HP %
+      var hpPct = boss.hp / boss.maxHp;
+      if (hpPct < 0.5 && boss.phase === 1) boss.phase = 2;
+      if (hpPct < 0.25 && boss.phase === 2) boss.phase = 3;
+
       if (boss.state === 'entering') {
         boss.y += 1.2;
         if (boss.y >= boss.targetY) {
@@ -657,50 +824,78 @@
           boss.y = boss.targetY;
         }
       } else if (boss.state === 'sweeping') {
+        boss.speed = 1.5 + boss.phase * 0.3;
         boss.x += boss.speed * boss.dir;
         if (boss.x > W - boss.w/2) boss.dir = -1;
         if (boss.x < boss.w/2) boss.dir = 1;
-        boss.y = boss.targetY + Math.sin(state.frame * 0.025) * 12;
+        boss.y = boss.targetY + Math.sin(state.frame * 0.025) * (10 + boss.phase * 4);
 
         // Boss shoot
         boss.shootTimer--;
         if (boss.shootTimer <= 0) {
-          // Spread shot
-          for (var a = -2; a <= 2; a++) {
-            var angle = Math.PI/2 + a * 0.25;
-            spawnEnemyBullet(boss.x + Math.cos(angle) * 20, boss.y + boss.h/2,
-              Math.cos(angle) * 3, Math.sin(angle) * 3);
+          if (boss.phase === 1) {
+            // Phase 1: spread + aimed
+            for (var a = -2; a <= 2; a++) {
+              var angle = Math.PI/2 + a * 0.25;
+              spawnEnemyBullet(boss.x + Math.cos(angle) * 20, boss.y + boss.h/2,
+                Math.cos(angle) * 3, Math.sin(angle) * 3);
+            }
+            var px = state.player.x - boss.x;
+            var py = state.player.y - boss.y;
+            var len = Math.sqrt(px*px + py*py);
+            if (len > 0) spawnEnemyBullet(boss.x, boss.y + boss.h/2, px/len * 4, py/len * 4);
+            boss.shootTimer = 35 + Math.floor(Math.random() * 15);
+          } else if (boss.phase === 2) {
+            // Phase 2: faster spread + double aimed
+            for (var a = -3; a <= 3; a++) {
+              if (a === 0) continue;
+              var angle = Math.PI/2 + a * 0.18;
+              spawnEnemyBullet(boss.x + Math.cos(angle) * 20, boss.y + boss.h/2,
+                Math.cos(angle) * 3.2, Math.sin(angle) * 3.2);
+            }
+            for (var s = -1; s <= 1; s += 2) {
+              var px = state.player.x - boss.x + s * 30;
+              var py = state.player.y - boss.y;
+              var len = Math.sqrt(px*px + py*py);
+              if (len > 0) spawnEnemyBullet(boss.x + s*15, boss.y + boss.h/2, px/len * 4.5, py/len * 4.5);
+            }
+            boss.shootTimer = 28 + Math.floor(Math.random() * 12);
+          } else {
+            // Phase 3: chaotic - spiral burst
+            boss.patternTimer++;
+            for (var a = -4; a <= 4; a++) {
+              var angle = Math.PI/2 + a * 0.15 + boss.patternTimer * 0.05;
+              spawnEnemyBullet(boss.x + Math.cos(angle) * 20, boss.y + boss.h/2,
+                Math.cos(angle) * 3.5, Math.sin(angle) * 3.5);
+            }
+            // Plus aimed
+            var px = state.player.x - boss.x;
+            var py = state.player.y - boss.y;
+            var len = Math.sqrt(px*px + py*py);
+            if (len > 0) spawnEnemyBullet(boss.x, boss.y + boss.h/2, px/len * 5, py/len * 5);
+            boss.shootTimer = 22 + Math.floor(Math.random() * 10);
           }
-          // Aimed shot
-          var dx = state.player.x - boss.x;
-          var dy = state.player.y - boss.y;
-          var len = Math.sqrt(dx*dx + dy*dy);
-          if (len > 0) {
-            spawnEnemyBullet(boss.x, boss.y + boss.h/2, dx/len * 4, dy/len * 4);
-          }
-          boss.shootTimer = 35 + Math.floor(Math.random() * 20);
         }
 
         // Boss spawn minions
         boss.spawnTimer--;
         if (boss.spawnTimer <= 0) {
-          var minionSize = 14;
-          state.enemies.push({
-            x: boss.x + (Math.random()-0.5) * 40,
-            y: boss.y + boss.h/2,
-            w: minionSize,
-            h: minionSize,
-            speed: 1.5 + Math.random(),
-            type: 'normal',
-            hp: 1,
-            maxHp: 1,
-            timer: 0,
-            oscPhase: 0
-          });
-          boss.spawnTimer = 90 + Math.floor(Math.random() * 60);
+          var count = boss.phase >= 2 ? 2 : 1;
+          for (var m = 0; m < count; m++) {
+            state.enemies.push({
+              x: boss.x + (Math.random()-0.5) * 50,
+              y: boss.y + boss.h/2,
+              w: 12, h: 12,
+              speed: 1.8 + Math.random() * 0.5,
+              type: 'basic', hp: 1, maxHp: 1,
+              color: 'red', timer: 0, oscPhase: 0,
+              oscSpeed: 0, oscRange: 0, baseX: 0,
+              shootTimer: 999, flash: 0
+            });
+          }
+          boss.spawnTimer = Math.max(40, 120 - boss.phase * 20) + Math.floor(Math.random() * 40);
         }
       }
-
       if (boss.flash > 0) boss.flash--;
     }
 
@@ -709,20 +904,25 @@
       var b = state.bullets[i];
       var hit = false;
 
-      // vs regular/elite enemies
+      // vs enemies
       for (var j = state.enemies.length - 1; j >= 0; j--) {
         var e = state.enemies[j];
         if (b.x > e.x - e.w/2 && b.x < e.x + e.w/2 &&
             b.y > e.y - e.h/2 && b.y < e.y + e.h/2) {
           e.hp--;
           if (e.hp <= 0) {
-            spawnExplosion(e.x, e.y, e.w, e.type === 'elite' ? 'purple' : 'orange');
-            dropOrb(e.x, e.y, e.type === 'elite' ? 'elite' : 'normal');
-            addKillScore(10);
+            var color = e.type === 'elite' ? 'purple' : e.color === 'green' ? 'green' : 'orange';
+            spawnExplosion(e.x, e.y, e.w, color);
+            // Splitter splits into 2 minions
+            if (e.type === 'splitter') {
+              spawnSplitMinion(e.x, e.y);
+              spawnSplitMinion(e.x, e.y);
+            }
+            dropOrb(e.x, e.y, e.type === 'elite' ? 'elite' : e.type);
+            addKillScore(e.type === 'tank' ? 20 : (e.type === 'splitter' ? 15 : 10));
             state.enemies.splice(j, 1);
           } else {
-            // HP flash
-            if (e.type === 'elite') e.flash = 4;
+            e.flash = 4;
           }
           state.bullets.splice(i, 1);
           hit = true;
@@ -821,11 +1021,11 @@
         if (o.type === 'blue') {
           if (state.attackLevel < MAX_ATK) {
             state.attackLevel++;
-            spawnExplosion(o.x, o.y, 15, 'blue');
-            addKillScore(20); // blue orb adds kill score
+            spawnLevelUpEffect(o.x, o.y);
+            addKillScore(20);
           } else {
-            addKillScore(50); // already maxed, extra points
-            spawnExplosion(o.x, o.y, 10, 'yellow');
+            addKillScore(50);
+            spawnExplosion(o.x, o.y, 15, 'yellow');
           }
         } else if (o.type === 'yellow') {
           spawnExplosion(o.x, o.y, 15, 'yellow');
@@ -906,15 +1106,24 @@
       drawOrb(state.orbs[i]);
     }
 
-    // --- Particles ---
+    // --- Particles (including ring effects) ---
     for (var i = 0; i < state.particles.length; i++) {
       var pt = state.particles[i];
       var alpha = Math.max(0, pt.life / pt.maxLife);
       ctx.globalAlpha = alpha;
       ctx.fillStyle = 'rgb(' + pt.r + ',' + pt.g + ',' + pt.b + ')';
-      ctx.beginPath();
-      ctx.arc(pt.x, pt.y, pt.size * alpha, 0, Math.PI * 2);
-      ctx.fill();
+      if (pt.isRing) {
+        pt.ringRadius += 2.5;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, pt.ringRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgb(' + pt.r + ',' + pt.g + ',' + pt.b + ')';
+        ctx.lineWidth = 2 + (1 - alpha) * 3;
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, pt.size * (0.5 + alpha * 0.5), 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.globalAlpha = 1;
 
@@ -960,6 +1169,22 @@
 
     // --- Boss ---
     if (state.boss) drawBoss(state.boss);
+
+    // --- Level Up Text ---
+    if (state.levelUpText > 0) {
+      var alpha = Math.min(1, state.levelUpText / 20);
+      var scale = 1 + (1 - alpha) * 0.5;
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#66ddff';
+      ctx.shadowBlur = 30;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#66ddff';
+      ctx.font = 'bold ' + Math.round(36 * scale) + 'px Arial, sans-serif';
+      ctx.fillText('⚡ 火力升级!', W/2, H/2 - 80);
+      ctx.restore();
+    }
 
     // --- Game Over ---
     if (state.gameOver) {
@@ -1087,11 +1312,8 @@
     var cx = e.x, cy = e.y, hw = e.w/2, hh = e.h/2;
 
     if (e.type === 'elite') {
-      // Elite - purple with HP indicator
       ctx.shadowColor = e.flash ? '#ffffff' : '#aa44ff';
       ctx.shadowBlur = e.flash ? 20 : 10;
-
-      // Body
       var gradE = ctx.createRadialGradient(cx, cy, 0, cx, cy, hw);
       gradE.addColorStop(0, e.flash ? '#ffffff' : '#bb55ff');
       gradE.addColorStop(0.6, e.flash ? '#ff88ff' : '#8822cc');
@@ -1105,8 +1327,6 @@
       ctx.lineTo(cx - hw, cy - hh/3);
       ctx.closePath();
       ctx.fill();
-
-      // Inner
       ctx.shadowBlur = 0;
       ctx.fillStyle = e.flash ? '#ffccff' : '#cc77ff';
       ctx.beginPath();
@@ -1117,26 +1337,125 @@
       ctx.lineTo(cx - hw/2, cy - hh/6);
       ctx.closePath();
       ctx.fill();
-
       // HP bar
       var hpPct = e.hp / e.maxHp;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.fillRect(cx - hw, cy - hh - 8, hw*2, 4);
       ctx.fillStyle = hpPct > 0.5 ? '#66ff66' : hpPct > 0.25 ? '#ffcc00' : '#ff4444';
       ctx.fillRect(cx - hw, cy - hh - 8, hw*2 * hpPct, 4);
+      ctx.shadowBlur = 0;
+      return;
+    }
 
+    // Flash white on hit
+    ctx.shadowBlur = e.flash ? 20 : 8;
+
+    if (e.color === 'orange' || e.type === 'fast') {
+      // Fast: small dart shape
+      ctx.shadowColor = '#ff8800';
+      ctx.fillStyle = e.flash ? '#ffffff' : '#dd6622';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - hh);
+      ctx.lineTo(cx - hw*0.6, cy + hh*0.6);
+      ctx.lineTo(cx - hw*0.2, cy + hh*0.3);
+      ctx.lineTo(cx, cy + hh);
+      ctx.lineTo(cx + hw*0.2, cy + hh*0.3);
+      ctx.lineTo(cx + hw*0.6, cy + hh*0.6);
+      ctx.closePath();
+      ctx.fill();
+    } else if (e.color === 'darkred' || e.type === 'tank') {
+      // Tank: hexagon with HP indicator
+      ctx.shadowColor = '#cc2222';
+      ctx.fillStyle = e.flash ? '#ffffff' : '#882222';
+      ctx.beginPath();
+      for (var i = 0; i < 6; i++) {
+        var angle = i * Math.PI/3;
+        var px = cx + hw * 0.85 * Math.cos(angle);
+        var py = cy + hh * 0.85 * Math.sin(angle);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#cc4444';
+      ctx.beginPath();
+      ctx.arc(cx, cy, hw * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      // HP dots
+      var hpDot = Math.max(0, e.hp);
+      for (var i = 0; i < e.maxHp; i++) {
+        ctx.fillStyle = i < hpDot ? '#66ff66' : '#333333';
+        ctx.beginPath();
+        ctx.arc(cx - 6 + i * 6, cy + hh + 4, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (e.color === 'magenta' || e.type === 'shooter') {
+      // Shooter: diamond with eye
+      ctx.shadowColor = '#ff44aa';
+      ctx.fillStyle = e.flash ? '#ffffff' : '#bb2288';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - hh);
+      ctx.lineTo(cx + hw, cy);
+      ctx.lineTo(cx, cy + hh);
+      ctx.lineTo(cx - hw, cy);
+      ctx.closePath();
+      ctx.fill();
+      // Eye
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ff66cc';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (e.color === 'cyan' || e.type === 'waver') {
+      // Waver: sleek crescent
+      ctx.shadowColor = '#22ddff';
+      ctx.fillStyle = e.flash ? '#ffffff' : '#228899';
+      ctx.beginPath();
+      ctx.moveTo(cx - hw, cy - hh*0.6);
+      ctx.quadraticCurveTo(cx, cy - hh*1.1, cx + hw, cy - hh*0.6);
+      ctx.quadraticCurveTo(cx + hw*0.5, cy, cx + hw, cy + hh*0.6);
+      ctx.quadraticCurveTo(cx, cy + hh*1.1, cx - hw, cy + hh*0.6);
+      ctx.quadraticCurveTo(cx - hw*0.5, cy, cx - hw, cy - hh*0.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#44ddff';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (e.color === 'green' || e.type === 'splitter') {
+      // Splitter: double triangle
+      ctx.shadowColor = '#44ff44';
+      ctx.fillStyle = e.flash ? '#ffffff' : '#22aa22';
+      // Top triangle
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - hh);
+      ctx.lineTo(cx - hw*0.7, cy);
+      ctx.lineTo(cx + hw*0.7, cy);
+      ctx.closePath();
+      ctx.fill();
+      // Bottom triangle
+      ctx.beginPath();
+      ctx.moveTo(cx - hw*0.7, cy);
+      ctx.lineTo(cx + hw*0.7, cy);
+      ctx.lineTo(cx, cy + hh);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#44ff66';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+      ctx.fill();
     } else {
-      // Normal enemy - red
+      // Basic: triangle
       ctx.shadowColor = '#ff3333';
-      ctx.shadowBlur = 8;
-      ctx.fillStyle = '#cc2222';
+      ctx.fillStyle = e.flash ? '#ffffff' : '#cc2222';
       ctx.beginPath();
       ctx.moveTo(cx, cy - hh);
       ctx.lineTo(cx - hw, cy + hh);
       ctx.lineTo(cx + hw, cy + hh);
       ctx.closePath();
       ctx.fill();
-
       ctx.shadowBlur = 0;
       ctx.fillStyle = '#ff4444';
       ctx.beginPath();
