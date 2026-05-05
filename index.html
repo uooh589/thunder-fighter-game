@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>雷霆战机 - Thunder Fighter</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a0a1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="雷霆战机">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -275,7 +280,8 @@
   var livesSpan = document.getElementById('livesDisplay');
   var atkPips = document.getElementById('atkPips');
 
-  var isMobile = window.innerWidth < 600;
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+var isMobile = window.innerWidth < 600;
   var W = 800;
   var H = isMobile ? Math.max(750, Math.min(1100, Math.round(800 * window.innerHeight / window.innerWidth))) : 600;
   canvas.width = W; canvas.height = H;

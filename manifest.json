@@ -1,0 +1,18 @@
+{
+  "name": "雷霆战机 - Thunder Fighter",
+  "short_name": "雷霆战机",
+  "description": "纵版弹幕射击游戏",
+  "start_url": "index.html",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#0a0a1a",
+  "theme_color": "#0a0a1a",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
