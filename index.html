@@ -857,131 +857,119 @@
     var p = state.player;
 
     if (state.autoPlay && !state.gameOver) {
-      // ---- Perfect Dodge AI: trajectory prediction ----
-      var HITBOX_R = p.hitboxR + 4; // player hitbox radius + bullet radius
+      // ===== Graceful Flow AI: 片叶不沾身 =====
+      // Three layers: emergency reflex → flow field → weave oscillation
 
-      // Evaluate candidate positions on a ring around current position
-      var candidates = [{ dx:0, dy:0 }]; // stay put is always an option
-      for (var a = 0; a < 16; a++) {
-        var angle = a / 16 * Math.PI * 2;
-        var rad = 15 + 25 * (a % 3); // mix of close and far options
-        candidates.push({ dx: Math.cos(angle) * rad, dy: Math.sin(angle) * rad });
+      var maxSpd = p.speed * state.speedMul;
+      var flowX = 0, flowY = 0;
+
+      // --- LAYER 1: Emergency reflex (bullet on collision course? perpendicular dodge) ---
+      var urgentX = 0, urgentY = 0, urgent = false;
+      for (var bi = 0; bi < state.enemyBullets.length; bi++) {
+        var eb = state.enemyBullets[bi];
+        var ddx = p.x - eb.x, ddy = p.y - eb.y;
+        var vx = eb.vx, vy = eb.vy;
+        var vlen2 = vx*vx + vy*vy;
+        if (vlen2 < 0.1) continue;
+        var t = -(ddx*vx + ddy*vy) / vlen2;
+        if (t > 0 && t < 25) {
+          var cx = eb.x + vx*t, cy = eb.y + vy*t;
+          var dist = Math.sqrt((p.x-cx)*(p.x-cx) + (p.y-cy)*(p.y-cy));
+          if (dist < p.hitboxR + 6) {
+            // Perpendicular dodge! (rotate velocity 90°)
+            var len = Math.sqrt(vlen2);
+            urgentX += (-vy / len) * 15;
+            urgentY += (vx / len) * 15;
+            urgent = true;
+          }
+        }
       }
-
-      var bestScore = -Infinity;
-      var bestDx = 0, bestDy = 0;
-
-      for (var ci = 0; ci < candidates.length; ci++) {
-        var candX = p.x + candidates[ci].dx;
-        var candY = p.y + candidates[ci].dy;
-        // Clamp to bounds
-        if (candX < p.hitboxR || candX > W - p.hitboxR || candY < p.hitboxR || candY > H - p.hitboxR) continue;
-
-        var safety = 1;
-        // Check each enemy bullet for closest approach to candidate position
+      if (urgent) {
+        // Emergency override: pure perpendicular escape
+        var uLen = Math.sqrt(urgentX*urgentX + urgentY*urgentY);
+        if (uLen > 0) { p.x += urgentX/uLen * maxSpd; p.y += urgentY/uLen * maxSpd; }
+        // Clamp
+        if (p.x < p.hitboxR) p.x = p.hitboxR; if (p.x > W-p.hitboxR) p.x = W-p.hitboxR;
+        if (p.y < p.hitboxR) p.y = p.hitboxR; if (p.y > H-p.hitboxR) p.y = H-p.hitboxR;
+      } else {
+        // --- LAYER 2: Flow field (attraction/repulsion) ---
+        // Repel from bullets (smooth inverse distance)
         for (var bi = 0; bi < state.enemyBullets.length; bi++) {
           var eb = state.enemyBullets[bi];
-          // Vector from bullet to candidate
-          var dx = candX - eb.x;
-          var dy = candY - eb.y;
-          // Bullet velocity
-          var vx = eb.vx * state.speedMul;
-          var vy = eb.vy * state.speedMul;
-          var vLen2 = vx*vx + vy*vy;
-          if (vLen2 < 0.01) {
-            // Stationary bullet: check current distance
-            var d = Math.sqrt(dx*dx + dy*dy);
-            if (d < HITBOX_R + 10) safety *= Math.max(0.01, d / (HITBOX_R + 10));
-            continue;
-          }
-          // Time of closest approach
-          var t = -(dx*vx + dy*vy) / vLen2;
-          // Only consider future (t > 0) and within 40 frames
-          if (t > 0 && t < 40) {
-            // Position at closest approach
-            var closeX = eb.x + vx * t;
-            var closeY = eb.y + vy * t;
-            var closeDx = candX - closeX;
-            var closeDy = candY - closeY;
-            var dist = Math.sqrt(closeDx*closeDx + closeDy*closeDy);
-            if (dist < HITBOX_R) {
-              // This bullet WILL hit this candidate position
-              safety = 0;
-              break;
-            } else if (dist < HITBOX_R * 3) {
-              // Near miss: reduce safety score
-              var threat = 1 - (dist - HITBOX_R) / (HITBOX_R * 2);
-              safety *= Math.max(0.01, 1 - threat * 0.8);
-            }
+          var dx = p.x - eb.x, dy = p.y - eb.y;
+          var dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < 250 && dist > 1) {
+            var force = Math.max(0, (250 - dist) / 250);
+            flowX += (dx/dist) * force * 6;
+            flowY += (dy/dist) * force * 6;
           }
         }
-        if (safety <= 0) continue; // lethal position, skip
 
-        // Bonus: proximity to enemy cluster (for aggression)
-        var attackScore = 0;
-        var clusterX = 0, clusterY = 0, clusterCount = 0;
+        // Attract to enemy cluster
+        var cx = 0, cy = 0, cw = 0;
         for (var ei = 0; ei < state.enemies.length; ei++) {
           var e = state.enemies[ei];
-          var w = e.type === 'elite' ? 3 : (e.type === 'basic' ? 1 : 1.5);
-          clusterX += e.x * w;
-          clusterY += e.y * w;
-          clusterCount += w;
+          var w = e.type === 'elite' ? 4 : e.type === 'tank' ? 2 : 1.5;
+          cx += e.x * w; cy += e.y * w; cw += w;
         }
-        if (clusterCount > 0) {
-          var cx = clusterX / clusterCount, cy = clusterY / clusterCount;
-          var dx = candX - cx, dy = candY - cy;
+        if (cw > 0) {
+          cx /= cw; cy /= cw;
+          var dx = cx - p.x, dy = cy - p.y;
           var d = Math.sqrt(dx*dx + dy*dy);
-          attackScore = Math.max(0, 300 - d) / 300;
+          if (d > 5) {
+            var pull = Math.min(1, d / 300);
+            flowX += (dx/d) * pull * 4;
+            flowY += (dy/d) * pull * 4;
+          }
         } else {
-          // Patrol toward center-upper
-          var dx = candX - W/2, dy = candY - H*0.3;
-          attackScore = Math.max(0, 200 - Math.sqrt(dx*dx + dy*dy)) / 200;
+          // Patrol
+          flowX += (W/2 - p.x) * 0.03;
+          flowY += (H*0.35 - p.y) * 0.03;
         }
 
-        // Bonus: proximity to valuable items
-        var itemScore = 0;
+        // Attract to items
         for (var oi = 0; oi < state.orbs.length; oi++) {
           var o = state.orbs[oi];
-          var dx = o.x - candX, dy = o.y - candY;
+          var dx = o.x - p.x, dy = o.y - p.y;
           var d = Math.sqrt(dx*dx + dy*dy);
-          var prio = o.type === 'heart' ? 3 : o.type === 'blue' ? 2 : o.type === 'shield' ? 1.5 : 1;
-          if (d < 200) itemScore += prio * (200 - d) / 200;
+          if (d < 250 && d > 1) {
+            var prio = o.type === 'heart' ? 3 : o.type === 'blue' ? 2 : o.type === 'shield' ? 1.5 : 1;
+            flowX += (dx/d) * (250-d)/250 * prio * 3;
+            flowY += (dy/d) * (250-d)/250 * prio * 3;
+          }
         }
 
-        // Total score: safety is king, then attack, then items
-        var score = safety * 1000 + attackScore * 200 + itemScore * 100;
-
-        // Slight preference for movement (visual interest)
-        if (ci > 0) score += 5;
-
-        if (score > bestScore) {
-          bestScore = score;
-          bestDx = candidates[ci].dx;
-          bestDy = candidates[ci].dy;
+        // --- LAYER 3: Rhythmic weave oscillation (观赏性游走) ---
+        // Figure-8 / sine wave perpendicular to movement direction
+        var flowLen = Math.sqrt(flowX*flowX + flowY*flowY);
+        if (flowLen > 0.5) {
+          // Unit direction of flow
+          var fx = flowX / flowLen, fy = flowY / flowLen;
+          // Perpendicular vector
+          var px = -fy, py = fx;
+          // Sine oscillation with time
+          var oscAmp = 1.5 + Math.sin(state.frame * 0.04) * 0.5;
+          var osc = Math.sin(state.frame * 0.06) * oscAmp;
+          flowX += px * osc;
+          flowY += py * osc;
+        } else {
+          // Idle sway when stationary
+          flowX += Math.sin(state.frame * 0.04) * 0.8;
+          flowY += Math.cos(state.frame * 0.03) * 0.5;
         }
-      }
 
-      // Move toward best candidate, clamped to max speed
-      var maxSpeed = p.speed * state.speedMul;
-      var moveLen = Math.sqrt(bestDx*bestDx + bestDy*bestDy);
-      if (moveLen > maxSpeed) {
-        p.x += bestDx / moveLen * maxSpeed;
-        p.y += bestDy / moveLen * maxSpeed;
-      } else if (moveLen > 2) {
-        p.x += bestDx;
-        p.y += bestDy;
-      } else if (state.enemies.length > 0) {
-        // Drift toward enemies even when standing still seems safe
-        var ex = 0, ey = 0, ec = 0;
-        for (var ei = 0; ei < state.enemies.length; ei++) {
-          ex += state.enemies[ei].x; ey += state.enemies[ei].y; ec++;
+        // Apply flow, clamped to max speed
+        var flowLen = Math.sqrt(flowX*flowX + flowY*flowY);
+        if (flowLen > maxSpd) {
+          p.x += flowX / flowLen * maxSpd;
+          p.y += flowY / flowLen * maxSpd;
+        } else if (flowLen > 0.5) {
+          p.x += flowX;
+          p.y += flowY;
         }
-        if (ec > 0) {
-          ex /= ec; ey /= ec;
-          var dx = ex - p.x, dy = ey - p.y;
-          var d = Math.sqrt(dx*dx + dy*dy);
-          if (d > 1) { p.x += dx/d * maxSpeed * 0.3; p.y += dy/d * maxSpeed * 0.3; }
-        }
+        // Clamp
+        if (p.x < p.hitboxR) p.x = p.hitboxR; if (p.x > W-p.hitboxR) p.x = W-p.hitboxR;
+        if (p.y < p.hitboxR) p.y = p.hitboxR; if (p.y > H-p.hitboxR) p.y = H-p.hitboxR;
       }
     } else if (touchActive) {
       var dx = touchX - p.x;
