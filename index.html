@@ -370,6 +370,8 @@
     flashOverlay: null,
     levelUpText: 0,
     paused: false,
+    menu: true,
+    easterEgg: 0,
     running: true
   };
 
@@ -378,8 +380,9 @@
   window.addEventListener('keydown', function(e) {
     keys[e.key] = true;
     if (e.key === 'r' || e.key === 'R') { if (state.gameOver) restartGame(); else { state.paused = false; restartGame(); } }
-    if (e.key === 'Escape') { state.paused = !state.paused; }
+    if (e.key === 'Escape') { if (state.menu) { state.menu = false; initAudio(); restartGame(); return; } state.paused = !state.paused; }
     if (e.key === 'q' || e.key === 'Q') { if (!state.paused) { state.autoPlay = !state.autoPlay; state.speedMul = state.autoPlay ? 1.5 : 1; updateUI(); } }
+    if (e.key === 'Enter') { if (state.menu) { state.menu = false; initAudio(); restartGame(); } }
     if (e.key === 'e' || e.key === 'E') { if (!state.paused) { activateBombardment(); keys['e'] = false; keys['E'] = false; } }
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
         e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ') e.preventDefault();
@@ -435,6 +438,9 @@
 
   canvas.addEventListener('touchstart', function(e) {
     e.preventDefault();
+
+    // Tap to start on menu
+    if (state.menu) { state.menu = false; initAudio(); restartGame(); return; }
 
     // Tap to restart on game over
     if (state.gameOver) {
@@ -503,6 +509,7 @@
 
   // Click/tap on canvas to restart on game over (for mouse/desktop)
   canvas.addEventListener('click', function() {
+    if (state.menu) { state.menu = false; initAudio(); restartGame(); return; }
     if (state.gameOver) restartGame();
   });
 
@@ -987,6 +994,7 @@
     state.autoSkillUses = 3;
     state.ai_ = null;
     state.aiRank = 0;
+    state.easterEgg = 0;
     state.flashOverlay = null;
     state.levelUpText = 0;
     state.running = true;
@@ -997,7 +1005,7 @@
 
   // ===================== Update =====================
   function update() {
-    if (state.gameOver || state.paused) return;
+    if (state.gameOver || state.paused || state.menu) return;
     state.frame++;
 
     // --- Player movement (auto-play / keyboard / touch) ---
@@ -1697,6 +1705,10 @@
       shieldSpan.textContent = '';
     }
 
+    // Easter egg: score 9999
+    if (state.score >= 9999 && state.easterEgg === 0) {
+      state.easterEgg = 300; // show for 5 seconds
+    }
     // Attack level pips
     var pipHtml = '';
     for (var i = 0; i < MAX_ATK; i++) {
@@ -1707,6 +1719,49 @@
 
   // ===================== Draw =====================
   function draw() {
+    // --- Menu Screen ---
+    if (state.menu) {
+      var mg = ctx.createLinearGradient(0,0,0,H);
+      mg.addColorStop(0,'#050520'); mg.addColorStop(0.5,'#0a0a3e'); mg.addColorStop(1,'#050520');
+      ctx.fillStyle = mg; ctx.fillRect(0,0,W,H);
+      // Stars background
+      for (var i=0;i<state.stars.length;i++){var s=state.stars[i];ctx.globalAlpha=s.bright*0.6;ctx.fillStyle='#c8dcff';ctx.beginPath();ctx.arc(s.x,s.y,s.size,0,Math.PI*2);ctx.fill();}
+      ctx.globalAlpha=1;
+      // Title
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.shadowColor='#3399ff';ctx.shadowBlur=40;
+      ctx.fillStyle='#66ddff';ctx.font='bold 56px Arial,sans-serif';
+      ctx.fillText('⚡ 雷霆战机',W/2,H*0.28);
+      ctx.shadowBlur=0;
+      ctx.fillStyle='#88ccff';ctx.font='18px Arial,sans-serif';
+      ctx.fillText('THUNDER FIGHTER',W/2,H*0.28+45);
+      // Version info
+      ctx.fillStyle='#446688';ctx.font='14px Arial,sans-serif';
+      ctx.fillText('v2.0 | HTML5 Canvas',W/2,H*0.28+72);
+      // Menu items
+      var bx=W/2-120, by=H*0.5, bw=240, bh=48;
+      ctx.fillStyle='rgba(20,60,120,0.6)';ctx.shadowColor='#3399ff';ctx.shadowBlur=15;
+      ctx.beginPath();ctx.roundRect(bx,by,bw,bh,12);ctx.fill();
+      ctx.shadowBlur=0;
+      ctx.fillStyle='#66ddff';ctx.font='bold 22px Arial,sans-serif';
+      ctx.fillText('🎮 开始游戏',W/2,by+bh/2);
+      // Controls help
+      ctx.fillStyle='#557799';ctx.font='14px Arial,sans-serif';
+      ctx.fillText('键盘 ↑↓←→/WASD 移动 | E 轰炸 | Q 托管 | Esc 暂停',W/2,H*0.72);
+      ctx.fillStyle='#446688';ctx.font='13px Arial,sans-serif';
+      ctx.fillText('移动端：拖拽移动 | 底部按钮放技能/托管/暂停',W/2,H*0.72+24);
+      // Motto
+      ctx.fillStyle='#335577';ctx.font='13px "KaiTi","STKaiti",serif';
+      ctx.fillText('— 在弹幕中起舞，于星辰中穿行 —',W/2,H*0.85);
+      // Click prompt
+      var pulse = 0.5 + 0.5*Math.sin(state.frame*0.04);
+      ctx.fillStyle='rgba(102,221,255,'+pulse*0.4+')';ctx.font='15px Arial,sans-serif';
+      ctx.fillText('点击任意位置 / 按 Enter 开始',W/2,H*0.93);
+      // Redraw stars for animation
+      state.frame++;
+      return;
+    }
+
     // --- Background ---
     var grad = ctx.createLinearGradient(0, 0, 0, H);
     grad.addColorStop(0, '#050510');
@@ -1940,6 +1995,27 @@
       ctx.font = 'bold ' + Math.round(36 * scale) + 'px Arial, sans-serif';
       ctx.fillText('⚡ 火力升级!', W/2, H/2 - 80);
       ctx.restore();
+    }
+
+    // --- Easter Egg: 少爷，该启动原神了 ---
+    if (state.easterEgg > 0) {
+      state.easterEgg--;
+      var ea = Math.min(1, state.easterEgg / 30);
+      ctx.fillStyle = 'rgba(0,0,0,' + (ea * 0.75) + ')';
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 40 * ea;
+      ctx.fillStyle = 'rgba(255,215,0,' + ea + ')';
+      ctx.font = 'bold ' + Math.round(36 + (1-ea)*10) + 'px "KaiTi","STKaiti",serif';
+      ctx.fillText('🎮 少爷，该启动原神了。', W/2, H/2 - 20);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255,200,100,' + (ea * 0.6) + ')';
+      ctx.font = '18px "KaiTi","STKaiti",serif';
+      ctx.fillText('✨ 恭喜达到 9999 分 ✨', W/2, H/2 + 40);
+      // Particle burst
+      if (state.easterEgg > 250) {
+        for (var ei=0; ei<2; ei++) spawnExplosion(Math.random()*W, Math.random()*H, 10, 'yellow');
+      }
     }
 
     // --- Bullet Time visual ---
