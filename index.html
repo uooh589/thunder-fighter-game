@@ -12,21 +12,56 @@
     justify-content: center;
     align-items: center;
     min-height: 100vh;
+    min-height: 100dvh;
     font-family: 'Segoe UI', 'Arial', sans-serif;
     user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    overflow: hidden;
+    touch-action: none;
   }
   .game-wrapper {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    width: 100%;
+    max-width: 820px;
+    padding: 8px;
+  }
+  .canvas-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 800px;
+    aspect-ratio: 800 / 600;
+    touch-action: none;
   }
   canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
     border: 2px solid #3399ff;
     border-radius: 8px;
     box-shadow: 0 0 40px rgba(51,153,255,0.3);
-    display: block;
     cursor: none;
+    touch-action: none;
+  }
+  /* Touch indicator ring */
+  #touchIndicator {
+    position: absolute;
+    pointer-events: none;
+    border: 2px solid rgba(102, 221, 255, 0.5);
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    transform: translate(-50%, -50%);
+    display: none;
+    box-shadow: 0 0 20px rgba(102, 221, 255, 0.2);
+    transition: width 0.15s, height 0.15s, opacity 0.15s;
+    z-index: 10;
+  }
+  #touchIndicator.active {
+    display: block;
   }
   .info-bar {
     width: 100%;
@@ -56,6 +91,7 @@
     border-radius: 50%;
     border: 1px solid #3399ff;
     background: transparent;
+    transition: all 0.2s;
   }
   .info-bar .atk-bar .atk-pip.filled {
     background: #66ddff;
@@ -65,6 +101,7 @@
     color: #6699aa;
     font-size: 13px;
     letter-spacing: 0.5px;
+    text-align: center;
   }
   .controls kbd {
     background: #1a2a3a;
@@ -88,6 +125,27 @@
     background: #1a3a5a;
     box-shadow: 0 0 15px rgba(51,153,255,0.4);
   }
+
+  /* --- Mobile Responsive --- */
+  @media (max-width: 840px) {
+    .game-wrapper { padding: 4px; gap: 6px; }
+    .info-bar { font-size: 12px; padding: 0 2px; }
+    .info-bar .atk-bar .atk-pip { width: 8px; height: 8px; }
+    .info-bar .atk-bar .atk-label { font-size: 10px; }
+    .controls { font-size: 11px; }
+    .controls kbd { font-size: 10px; padding: 1px 5px; }
+    .restart-btn { font-size: 11px; padding: 4px 14px; }
+  }
+  @media (max-width: 480px) {
+    .game-wrapper { padding: 2px; gap: 4px; }
+    .info-bar { font-size: 10px; }
+    .info-bar .atk-bar .atk-pip { width: 6px; height: 6px; gap: 2px; }
+    .controls .desktop-only { display: none; }
+  }
+  @media (pointer: coarse) {
+    canvas { cursor: default; }
+    .controls kbd { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -100,9 +158,12 @@
     </div>
     <span id="livesDisplay">❤❤❤</span>
   </div>
-  <canvas id="gameCanvas" width="800" height="600"></canvas>
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="touchIndicator"></div>
+  </div>
   <div class="controls">
-    <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> 或 <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> 移动 &nbsp;|&nbsp;
+    <span class="desktop-only"><kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> 或 <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> 移动 &nbsp;|&nbsp;</span>
     <kbd>R</kbd> 重新开始 &nbsp;|&nbsp;
     <button class="restart-btn" id="restartBtn">✈ 重新开始</button>
   </div>
@@ -155,6 +216,96 @@
   });
   window.addEventListener('keyup', function(e) { keys[e.key] = false; });
   document.getElementById('restartBtn').addEventListener('click', restartGame);
+
+  // ===================== Touch Controls =====================
+  var touchActive = false;
+  var touchX = 0, touchY = 0;
+  var touchId = null;
+  var touchIndicator = document.getElementById('touchIndicator');
+  var canvasWrap = document.getElementById('canvasWrap');
+
+  function getCanvasCoords(clientX, clientY) {
+    var rect = canvas.getBoundingClientRect();
+    return {
+      x: (clientX - rect.left) * (W / rect.width),
+      y: (clientY - rect.top) * (H / rect.height)
+    };
+  }
+
+  function showTouchIndicator(x, y) {
+    touchIndicator.style.left = x + 'px';
+    touchIndicator.style.top = y + 'px';
+    touchIndicator.classList.add('active');
+  }
+
+  function hideTouchIndicator() {
+    touchIndicator.classList.remove('active');
+  }
+
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+
+    // Tap to restart on game over
+    if (state.gameOver) {
+      restartGame();
+      return;
+    }
+
+    if (touchActive) return;
+    var touch = e.changedTouches[0];
+    touchId = touch.identifier;
+    var coords = getCanvasCoords(touch.clientX, touch.clientY);
+    touchX = coords.x;
+    touchY = coords.y;
+    touchActive = true;
+
+    var rect = canvas.getBoundingClientRect();
+    showTouchIndicator(
+      touch.clientX - rect.left,
+      touch.clientY - rect.top
+    );
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var touch = e.changedTouches[i];
+      if (touch.identifier === touchId) {
+        var coords = getCanvasCoords(touch.clientX, touch.clientY);
+        touchX = coords.x;
+        touchY = coords.y;
+
+        var rect = canvas.getBoundingClientRect();
+        showTouchIndicator(
+          touch.clientX - rect.left,
+          touch.clientY - rect.top
+        );
+        break;
+      }
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', function(e) {
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === touchId) {
+        touchActive = false;
+        touchId = null;
+        hideTouchIndicator();
+        break;
+      }
+    }
+  });
+
+  canvas.addEventListener('touchcancel', function(e) {
+    touchActive = false;
+    touchId = null;
+    hideTouchIndicator();
+  });
+
+  // Click/tap on canvas to restart on game over (for mouse/desktop)
+  canvas.addEventListener('click', function() {
+    if (state.gameOver) restartGame();
+  });
 
   // ===================== Player =====================
   function makePlayer() { return { x: W/2, y: H-60, w: 28, h: 34 }; }
@@ -406,12 +557,24 @@
     if (state.gameOver) return;
     state.frame++;
 
-    // --- Player movement ---
+    // --- Player movement (keyboard + touch) ---
     var p = state.player;
-    if (keys['ArrowLeft'] || keys['a'] || keys['A']) p.x -= 5;
-    if (keys['ArrowRight'] || keys['d'] || keys['D']) p.x += 5;
-    if (keys['ArrowUp'] || keys['w'] || keys['W']) p.y -= 5;
-    if (keys['ArrowDown'] || keys['s'] || keys['S']) p.y += 5;
+    if (touchActive) {
+      var dx = touchX - p.x;
+      var dy = touchY - p.y;
+      var dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist > 5) {
+        var moveSpd = Math.min(7, dist * 0.15 + 3);
+        p.x += (dx / dist) * moveSpd;
+        p.y += (dy / dist) * moveSpd;
+      }
+    } else {
+      if (keys['ArrowLeft'] || keys['a'] || keys['A']) p.x -= 5;
+      if (keys['ArrowRight'] || keys['d'] || keys['D']) p.x += 5;
+      if (keys['ArrowUp'] || keys['w'] || keys['W']) p.y -= 5;
+      if (keys['ArrowDown'] || keys['s'] || keys['S']) p.y += 5;
+    }
+    // Clamp
     if (p.x < p.w/2) p.x = p.w/2;
     if (p.x > W - p.w/2) p.x = W - p.w/2;
     if (p.y < p.h/2) p.y = p.h/2;
@@ -815,7 +978,7 @@
       ctx.fillText('最终得分: ' + state.score, W/2, H/2 + 30);
       ctx.fillStyle = '#88ccff';
       ctx.font = '18px Arial, sans-serif';
-      ctx.fillText('按 R 键或点击按钮重新开始', W/2, H/2 + 90);
+      ctx.fillText('按 R 键 / 点击按钮 / 触摸屏幕重新开始', W/2, H/2 + 90);
     }
   }
 
