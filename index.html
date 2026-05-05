@@ -857,11 +857,24 @@
     var p = state.player;
 
     if (state.autoPlay && !state.gameOver) {
-      // ===== Graceful Flow AI: 片叶不沾身 =====
-      // Three layers: emergency reflex → flow field → weave oscillation
-
+      // ===== Flow Combat AI: 穿梭弹幕 + 走位输出 =====
       var maxSpd = p.speed * state.speedMul;
+      var maxSpdSq = maxSpd * maxSpd;
       var flowX = 0, flowY = 0;
+
+      // --- LAYER 0: Enemy ship collision avoidance (紧急避险:撞不到我) ---
+      var enemyAvoidX = 0, enemyAvoidY = 0;
+      for (var ei = 0; ei < state.enemies.length; ei++) {
+        var e = state.enemies[ei];
+        var dx = p.x - e.x, dy = p.y - e.y;
+        var dist = Math.sqrt(dx*dx + dy*dy);
+        var dangerR = p.hitboxR + e.w/2 + 40; // 40px safety margin
+        if (dist < dangerR && dist > 1) {
+          var urgency = (dangerR - dist) / dangerR;
+          enemyAvoidX += (dx/dist) * urgency * 12;
+          enemyAvoidY += (dy/dist) * urgency * 12;
+        }
+      }
 
       // --- LAYER 1: Emergency reflex (bullet on collision course? perpendicular dodge) ---
       var urgentX = 0, urgentY = 0, urgent = false;
@@ -876,7 +889,6 @@
           var cx = eb.x + vx*t, cy = eb.y + vy*t;
           var dist = Math.sqrt((p.x-cx)*(p.x-cx) + (p.y-cy)*(p.y-cy));
           if (dist < p.hitboxR + 6) {
-            // Perpendicular dodge! (rotate velocity 90°)
             var len = Math.sqrt(vlen2);
             urgentX += (-vy / len) * 15;
             urgentY += (vx / len) * 15;
@@ -884,50 +896,73 @@
           }
         }
       }
-      if (urgent) {
-        // Emergency override: pure perpendicular escape
-        var uLen = Math.sqrt(urgentX*urgentX + urgentY*urgentY);
-        if (uLen > 0) { p.x += urgentX/uLen * maxSpd; p.y += urgentY/uLen * maxSpd; }
-        // Clamp
-        if (p.x < p.hitboxR) p.x = p.hitboxR; if (p.x > W-p.hitboxR) p.x = W-p.hitboxR;
-        if (p.y < p.hitboxR) p.y = p.hitboxR; if (p.y > H-p.hitboxR) p.y = H-p.hitboxR;
+      // Merge enemy avoidance into urgent if active
+      if (urgent || Math.sqrt(enemyAvoidX*enemyAvoidX+enemyAvoidY*enemyAvoidY) > 5) {
+        var evadeX = urgentX + enemyAvoidX * 2;
+        var evadeY = urgentY + enemyAvoidY * 2;
+        var eLen = Math.sqrt(evadeX*evadeX + evadeY*evadeY);
+        if (eLen > 0) { p.x += evadeX/eLen * maxSpd; p.y += evadeY/eLen * maxSpd; }
+        p.x = Math.max(p.hitboxR, Math.min(W-p.hitboxR, p.x));
+        p.y = Math.max(p.hitboxR, Math.min(H-p.hitboxR, p.y));
       } else {
-        // --- LAYER 2: Flow field (attraction/repulsion) ---
-        // Repel from bullets (smooth inverse distance)
+        // ===== LAYER 2: Combat positioning =====
+        // Repel from enemy ships (soft, not as urgent as Layer 0)
+        for (var ei = 0; ei < state.enemies.length; ei++) {
+          var e = state.enemies[ei];
+          var dx = p.x - e.x, dy = p.y - e.y;
+          var dist = Math.sqrt(dx*dx + dy*dy);
+          var repelR = p.hitboxR + e.w/2 + 80;
+          if (dist < repelR && dist > 1) {
+            var force = (repelR - dist) / repelR;
+            flowX += (dx/dist) * force * 5;
+            flowY += (dy/dist) * force * 5;
+          }
+        }
+
+        // Repel from bullets
         for (var bi = 0; bi < state.enemyBullets.length; bi++) {
           var eb = state.enemyBullets[bi];
           var dx = p.x - eb.x, dy = p.y - eb.y;
           var dist = Math.sqrt(dx*dx + dy*dy);
-          if (dist < 250 && dist > 1) {
-            var force = Math.max(0, (250 - dist) / 250);
-            flowX += (dx/dist) * force * 6;
-            flowY += (dy/dist) * force * 6;
+          if (dist < 200 && dist > 1) {
+            var force = Math.max(0, (200 - dist) / 200);
+            flowX += (dx/dist) * force * 5;
+            flowY += (dy/dist) * force * 5;
           }
         }
 
-        // Attract to enemy cluster
-        var cx = 0, cy = 0, cw = 0;
+        // Attract to combat zone with optimal firing distance
+        var cx = 0, cy = 0, cw = 0, cMinY = H;
         for (var ei = 0; ei < state.enemies.length; ei++) {
           var e = state.enemies[ei];
           var w = e.type === 'elite' ? 4 : e.type === 'tank' ? 2 : 1.5;
           cx += e.x * w; cy += e.y * w; cw += w;
+          if (e.y < cMinY) cMinY = e.y;
         }
         if (cw > 0) {
           cx /= cw; cy /= cw;
-          var dx = cx - p.x, dy = cy - p.y;
+          // Optimal firing range: 150-250px below enemies (spread covers max area)
+          var targetX = cx;
+          var targetY = Math.max(p.hitboxR, Math.min(H * 0.7, cy + 180));
+          // Horizontal sweep: oscillate around enemy center for spread coverage
+          var sweep = Math.sin(state.frame * 0.025) * 120;
+          targetX += sweep;
+          var dx = targetX - p.x, dy = targetY - p.y;
           var d = Math.sqrt(dx*dx + dy*dy);
-          if (d > 5) {
-            var pull = Math.min(1, d / 300);
+          if (d > 10) {
+            var pull = Math.min(1, d / 200);
             flowX += (dx/d) * pull * 4;
             flowY += (dy/d) * pull * 4;
           }
         } else {
-          // Patrol
-          flowX += (W/2 - p.x) * 0.03;
-          flowY += (H*0.35 - p.y) * 0.03;
+          // No enemies: patrol with sweeping motion
+          var patrolX = W/2 + Math.sin(state.frame * 0.02) * 150;
+          var patrolY = H * 0.35;
+          flowX += (patrolX - p.x) * 0.03;
+          flowY += (patrolY - p.y) * 0.03;
         }
 
-        // Attract to items
+        // Attract to items (quick detours)
         for (var oi = 0; oi < state.orbs.length; oi++) {
           var o = state.orbs[oi];
           var dx = o.x - p.x, dy = o.y - p.y;
@@ -939,26 +974,22 @@
           }
         }
 
-        // --- LAYER 3: Rhythmic weave oscillation (观赏性游走) ---
-        // Figure-8 / sine wave perpendicular to movement direction
+        // --- LAYER 3: Dynamic weave (观赏性穿行) ---
         var flowLen = Math.sqrt(flowX*flowX + flowY*flowY);
-        if (flowLen > 0.5) {
-          // Unit direction of flow
+        if (flowLen > 1) {
           var fx = flowX / flowLen, fy = flowY / flowLen;
-          // Perpendicular vector
           var px = -fy, py = fx;
-          // Sine oscillation with time
-          var oscAmp = 1.5 + Math.sin(state.frame * 0.04) * 0.5;
-          var osc = Math.sin(state.frame * 0.06) * oscAmp;
-          flowX += px * osc;
-          flowY += py * osc;
+          // Biaxial oscillation for figure-8 patterns
+          var oscT = state.frame * 0.045;
+          var oscAmp = 2.5 + Math.sin(state.frame * 0.02) * 1.5;
+          flowX += px * Math.sin(oscT) * oscAmp;
+          flowY += py * Math.cos(oscT * 0.7) * oscAmp * 0.8;
         } else {
-          // Idle sway when stationary
-          flowX += Math.sin(state.frame * 0.04) * 0.8;
-          flowY += Math.cos(state.frame * 0.03) * 0.5;
+          flowX += Math.sin(state.frame * 0.04) * 1.5;
+          flowY += Math.cos(state.frame * 0.03) * 1.0;
         }
 
-        // Apply flow, clamped to max speed
+        // Apply
         var flowLen = Math.sqrt(flowX*flowX + flowY*flowY);
         if (flowLen > maxSpd) {
           p.x += flowX / flowLen * maxSpd;
@@ -967,9 +998,8 @@
           p.x += flowX;
           p.y += flowY;
         }
-        // Clamp
-        if (p.x < p.hitboxR) p.x = p.hitboxR; if (p.x > W-p.hitboxR) p.x = W-p.hitboxR;
-        if (p.y < p.hitboxR) p.y = p.hitboxR; if (p.y > H-p.hitboxR) p.y = H-p.hitboxR;
+        p.x = Math.max(p.hitboxR, Math.min(W-p.hitboxR, p.x));
+        p.y = Math.max(p.hitboxR, Math.min(H-p.hitboxR, p.y));
       }
     } else if (touchActive) {
       var dx = touchX - p.x;
