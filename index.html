@@ -192,7 +192,7 @@
       <span class="atk-label">⚡火力</span>
       <span class="atk-pips" id="atkPips"></span>
     </div>
-    <span id="livesDisplay">❤❤❤</span>
+    <span><span id="shieldDisplay"></span><span id="livesDisplay">❤❤❤</span></span>
   </div>
   <div class="canvas-wrap" id="canvasWrap">
     <canvas id="gameCanvas" width="800" height="600"></canvas>
@@ -239,6 +239,10 @@
     bossThreshold: 1000,
     yellowTimer: 0,
     boss: null,
+    followers: [],
+    shield: 0,
+    skillCooldown: 0,
+    skillReady: false,
     levelUpText: 0,
     running: true
   };
@@ -288,9 +292,15 @@
       return;
     }
 
-    if (touchActive) return;
+    // Multi-touch: second finger triggers skill
+    if (touchActive || state.touchCount > 0) {
+      activateShockwave();
+      return;
+    }
+
     var touch = e.changedTouches[0];
     touchId = touch.identifier;
+    state.touchCount = (state.touchCount || 0) + 1;
     var coords = getCanvasCoords(touch.clientX, touch.clientY);
     touchX = coords.x;
     touchY = coords.y;
@@ -323,6 +333,7 @@
   }, { passive: false });
 
   canvas.addEventListener('touchend', function(e) {
+    state.touchCount = Math.max(0, (state.touchCount || 0) - e.changedTouches.length);
     for (var i = 0; i < e.changedTouches.length; i++) {
       if (e.changedTouches[i].identifier === touchId) {
         touchActive = false;
@@ -336,6 +347,7 @@
   canvas.addEventListener('touchcancel', function(e) {
     touchActive = false;
     touchId = null;
+    state.touchCount = 0;
     hideTouchIndicator();
   });
 
@@ -582,6 +594,167 @@
     state.levelUpText = 50; // show level up text for 50 frames
   }
 
+  // ===================== Follower System =====================
+  function spawnFollower() {
+    if (state.followers.length >= 5) {
+      // Upgrade lowest-level follower
+      var lowest = null;
+      for (var i = 0; i < state.followers.length; i++) {
+        if (!lowest || state.followers[i].level < lowest.level) lowest = state.followers[i];
+      }
+      if (lowest) {
+        lowest.level++;
+        lowest.shootTimer = 0;
+        spawnLevelUpEffect(lowest.x, lowest.y);
+      }
+      return;
+    }
+    var angle = (state.followers.length / 5) * Math.PI * 2;
+    state.followers.push({
+      x: state.player.x, y: state.player.y,
+      angle: angle,
+      orbitSpeed: 0.03 + Math.random() * 0.02,
+      orbitRadius: 40 + state.followers.length * 8,
+      level: 1,
+      shootTimer: Math.floor(Math.random() * 30)
+    });
+    spawnLevelUpEffect(state.player.x, state.player.y - 20);
+  }
+
+  function removeFollower() {
+    if (state.followers.length === 0) return;
+    // Remove highest level follower (most valuable)
+    var highest = null;
+    var idx = -1;
+    for (var i = 0; i < state.followers.length; i++) {
+      if (!highest || state.followers[i].level > highest.level) {
+        highest = state.followers[i];
+        idx = i;
+      }
+    }
+    if (idx >= 0) {
+      spawnExplosion(state.followers[idx].x, state.followers[idx].y, 20, 'blue');
+      state.followers.splice(idx, 1);
+    }
+  }
+
+  // ===================== Skill: Shockwave =====================
+  function activateShockwave() {
+    if (state.skillCooldown > 0) return;
+    state.skillCooldown = 180; // 3 seconds
+    state.skillReady = false;
+
+    var cx = state.player.x, cy = state.player.y;
+
+    // Visual: big expanding ring
+    state.particles.push({
+      x: cx, y: cy, vx: 0, vy: 0,
+      life: 30, maxLife: 30,
+      size: 3, r: 150, g: 220, b: 255,
+      isRing: true, ringRadius: 0
+    });
+
+    // Second ring
+    state.particles.push({
+      x: cx, y: cy, vx: 0, vy: 0,
+      life: 25, maxLife: 25,
+      size: 2, r: 255, g: 255, b: 255,
+      isRing: true, ringRadius: 0
+    });
+
+    // Burst particles
+    for (var i = 0; i < 40; i++) {
+      var angle = Math.random() * Math.PI * 2;
+      var spd = 3 + Math.random() * 6;
+      state.particles.push({
+        x: cx, y: cy,
+        vx: Math.cos(angle) * spd, vy: Math.sin(angle) * spd,
+        life: 15 + Math.random() * 15, maxLife: 30,
+        size: 2 + Math.random() * 3,
+        r: 100 + Math.floor(Math.random() * 155),
+        g: 200 + Math.floor(Math.random() * 55),
+        b: 255, isRing: false
+      });
+    }
+
+    // Damage enemies in range
+    var shockRadius = 180;
+    for (var i = state.enemies.length - 1; i >= 0; i--) {
+      var e = state.enemies[i];
+      var dx = e.x - cx, dy = e.y - cy;
+      var dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < shockRadius) {
+        var dmg = 2;
+        e.hp -= dmg;
+        // Push enemy away
+        if (dist > 1) {
+          e.x += (dx / dist) * 40;
+          e.y += (dy / dist) * 40;
+        }
+        if (e.hp <= 0) {
+          spawnExplosion(e.x, e.y, e.w, e.type === 'elite' ? 'purple' : 'orange');
+          dropOrb(e.x, e.y, e.type === 'elite' ? 'elite' : e.type);
+          addKillScore(e.type === 'tank' ? 20 : (e.type === 'splitter' ? 15 : 10));
+          state.enemies.splice(i, 1);
+        } else {
+          e.flash = 8;
+        }
+      }
+    }
+
+    // Destroy enemy bullets in range
+    for (var i = state.enemyBullets.length - 1; i >= 0; i--) {
+      var eb = state.enemyBullets[i];
+      var dx = eb.x - cx, dy = eb.y - cy;
+      if (Math.sqrt(dx*dx + dy*dy) < shockRadius) {
+        spawnExplosion(eb.x, eb.y, 8, 'blue');
+        state.enemyBullets.splice(i, 1);
+      }
+    }
+
+    // Damage boss
+    if (state.boss) {
+      var boss = state.boss;
+      var dx = boss.x - cx, dy = boss.y - cy;
+      if (Math.sqrt(dx*dx + dy*dy) < shockRadius + boss.w/2) {
+        boss.hp -= 3;
+        boss.flash = 10;
+        if (boss.hp <= 0) {
+          spawnExplosion(boss.x, boss.y, boss.w, 'boss');
+          for (var k = 0; k < 5; k++) {
+            (function() { var delay = k; setTimeout(function() {
+              if (!state.gameOver) spawnExplosion(
+                boss.x + (Math.random()-0.5)*60, boss.y + (Math.random()-0.5)*40, boss.w/2, 'boss'
+              );
+            }, delay * 100); })();
+          }
+          dropOrb(boss.x, boss.y, 'boss');
+          addKillScore(200);
+          state.boss = null;
+        }
+      }
+    }
+  }
+
+  // ===================== Heart & Shield Items =====================
+  function spawnHeart() {
+    if (state.orbs.length >= 20) return;
+    state.orbs.push({
+      x: 30 + Math.random() * (W - 60), y: -10,
+      w: 14, h: 14, vy: 0.5 + Math.random() * 0.2,
+      type: 'heart', timer: Math.random() * 100
+    });
+  }
+
+  function spawnShieldItem() {
+    if (state.orbs.length >= 20) return;
+    state.orbs.push({
+      x: 30 + Math.random() * (W - 60), y: -10,
+      w: 14, h: 14, vy: 0.5 + Math.random() * 0.2,
+      type: 'shield', timer: Math.random() * 100
+    });
+  }
+
   // ===================== Particles =====================
   function spawnExplosion(x, y, size, color) {
     var count = 6 + Math.floor(size / 4);
@@ -666,8 +839,13 @@
     state.bossThreshold = 1000;
     state.yellowTimer = 0;
     state.boss = null;
+    state.followers = [];
+    state.shield = 0;
+    state.skillCooldown = 0;
+    state.skillReady = false;
     state.levelUpText = 0;
     state.running = true;
+    state.touchCount = 0;
     initStars();
     updateUI();
   }
@@ -720,6 +898,62 @@
     if (state.yellowTimer >= 400 + Math.floor(Math.random() * 200)) {
       state.yellowTimer = 0;
       spawnOrb('yellow', 30 + Math.random() * (W - 60), -10);
+    }
+
+    // --- Heart spawn (every ~600 frames) ---
+    if (state.frame % 600 === 0 && state.lives < state.maxLives) {
+      if (Math.random() < 0.4) spawnHeart();
+    }
+
+    // --- Shield spawn (every ~800 frames) ---
+    if (state.frame % 800 === 0 && state.shield <= 0) {
+      if (Math.random() < 0.35) spawnShieldItem();
+    }
+
+    // --- Skill cooldown ---
+    if (state.skillCooldown > 0) {
+      state.skillCooldown--;
+      if (state.skillCooldown <= 0) state.skillReady = true;
+    }
+
+    // --- Follower update ---
+    for (var i = 0; i < state.followers.length; i++) {
+      var f = state.followers[i];
+      f.angle += f.orbitSpeed;
+      f.x = state.player.x + Math.cos(f.angle) * f.orbitRadius;
+      f.y = state.player.y + Math.sin(f.angle) * f.orbitRadius;
+      // Follower shoots
+      f.shootTimer--;
+      if (f.shootTimer <= 0) {
+        var fireRate = Math.max(10, 40 - f.level * 6);
+        // Find nearest enemy
+        var nearest = null, nearDist = Infinity;
+        for (var ei = 0; ei < state.enemies.length; ei++) {
+          var dx = state.enemies[ei].x - f.x;
+          var dy = state.enemies[ei].y - f.y;
+          var d = Math.sqrt(dx*dx + dy*dy);
+          if (d < nearDist) { nearDist = d; nearest = state.enemies[ei]; }
+        }
+        var aimX = nearest ? nearest.x : f.x;
+        var aimY = nearest ? (nearest.y + nearest.h/2) : f.y - 100;
+        var dx = aimX - f.x, dy = aimY - f.y;
+        var len = Math.sqrt(dx*dx + dy*dy);
+        if (len > 0 && state.bullets.length < 60) {
+          state.bullets.push({
+            x: f.x, y: f.y,
+            vx: dx/len * 8, vy: dy/len * 8,
+            w: 3, h: 6
+          });
+        }
+        f.shootTimer = fireRate + Math.floor(Math.random() * 10);
+      }
+    }
+
+    // --- Skill activation (E key) ---
+    if (keys['e'] || keys['E']) {
+      keys['e'] = false;
+      keys['E'] = false;
+      activateShockwave();
     }
 
     // --- Level up text timer ---
@@ -962,6 +1196,29 @@
       }
     }
 
+    // --- Player damage helper: shield -> follower -> life ---
+    function playerTakeDamage() {
+      if (state.invincible > 0) return false;
+      if (state.shield > 0) {
+        state.shield = 0;
+        spawnExplosion(p.x, p.y - 20, 25, 'blue');
+        state.invincible = 30;
+        updateUI();
+        return false;
+      }
+      if (state.followers.length > 0) {
+        removeFollower();
+        state.invincible = 30;
+        updateUI();
+        return false;
+      }
+      state.lives--;
+      state.invincible = 60;
+      updateUI();
+      if (state.lives <= 0) { state.gameOver = true; return true; }
+      return true;
+    }
+
     // --- Player vs enemies ---
     if (state.invincible <= 0) {
       for (var i = state.enemies.length - 1; i >= 0; i--) {
@@ -971,10 +1228,7 @@
         if (dist < p.w/2 + e.w/2 - 4) {
           spawnExplosion(e.x, e.y, e.w, 'orange');
           state.enemies.splice(i, 1);
-          state.lives--;
-          state.invincible = 60;
-          updateUI();
-          if (state.lives <= 0) { state.gameOver = true; return; }
+          if (playerTakeDamage()) return;
           break;
         }
       }
@@ -986,29 +1240,22 @@
       var dx = p.x - boss.x, dy = p.y - boss.y;
       var dist = Math.sqrt(dx*dx + dy*dy);
       if (dist < p.w/2 + boss.w/2 - 10) {
-        state.lives--;
-        state.invincible = 60;
         boss.flash = 8;
-        updateUI();
-        if (state.lives <= 0) { state.gameOver = true; return; }
+        if (playerTakeDamage()) return;
       }
     }
 
     // --- Player vs enemy bullets ---
-    if (state.invincible <= 0) {
-      for (var i = state.enemyBullets.length - 1; i >= 0; i--) {
-        var eb = state.enemyBullets[i];
-        var dx = p.x - eb.x, dy = p.y - eb.y;
-        var dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < p.w/2 + 4) {
-          spawnExplosion(eb.x, eb.y, 10, 'red');
-          state.enemyBullets.splice(i, 1);
-          state.lives--;
-          state.invincible = 60;
-          updateUI();
-          if (state.lives <= 0) { state.gameOver = true; return; }
-          break;
-        }
+    for (var i = state.enemyBullets.length - 1; i >= 0; i--) {
+      var eb = state.enemyBullets[i];
+      if (state.invincible > 0) break;
+      var dx = p.x - eb.x, dy = p.y - eb.y;
+      var dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < p.w/2 + 4) {
+        spawnExplosion(eb.x, eb.y, 10, 'red');
+        state.enemyBullets.splice(i, 1);
+        if (playerTakeDamage()) return;
+        break;
       }
     }
 
@@ -1024,12 +1271,19 @@
             spawnLevelUpEffect(o.x, o.y);
             addKillScore(20);
           } else {
-            addKillScore(50);
-            spawnExplosion(o.x, o.y, 15, 'yellow');
+            spawnFollower(); // Add/upgrade follower instead of +50
+            addKillScore(10);
           }
         } else if (o.type === 'yellow') {
           spawnExplosion(o.x, o.y, 15, 'yellow');
-          addBonusScore(50); // yellow orb doesn't trigger thresholds
+          addBonusScore(50);
+        } else if (o.type === 'heart') {
+          spawnExplosion(o.x, o.y, 15, 'yellow');
+          if (state.lives < state.maxLives) state.lives++;
+          updateUI();
+        } else if (o.type === 'shield') {
+          spawnExplosion(o.x, o.y, 15, 'blue');
+          state.shield = 1;
         }
         state.orbs.splice(i, 1);
         updateUI();
@@ -1071,6 +1325,14 @@
     var hearts = '';
     for (var i = 0; i < Math.max(0, state.lives); i++) hearts += '❤';
     livesSpan.textContent = hearts;
+
+    // Shield display
+    var shieldSpan = document.getElementById('shieldDisplay');
+    if (state.shield > 0) {
+      shieldSpan.textContent = '🛡 ';
+    } else {
+      shieldSpan.textContent = '';
+    }
 
     // Attack level pips
     var pipHtml = '';
@@ -1170,6 +1432,81 @@
     // --- Boss ---
     if (state.boss) drawBoss(state.boss);
 
+    // --- Followers ---
+    for (var i = 0; i < state.followers.length; i++) {
+      var f = state.followers[i];
+      var pulse = 1 + 0.1 * Math.sin(state.frame * 0.08 + i);
+      // Follower body: small simplified fighter
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.shadowColor = '#66ddff';
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = '#3a8cff';
+      var s = 6 + f.level * 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, -s * pulse);
+      ctx.lineTo(-s*0.8, s*0.5);
+      ctx.lineTo(-s*0.3, s*0.8);
+      ctx.lineTo(0, s*0.4);
+      ctx.lineTo(s*0.3, s*0.8);
+      ctx.lineTo(s*0.8, s*0.5);
+      ctx.closePath();
+      ctx.fill();
+      // Level indicator
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold ' + Math.round(6 + f.level * 0.5) + 'px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(f.level, 0, 0);
+      ctx.restore();
+    }
+
+    // --- Shield visual ---
+    if (state.shield > 0 && !state.gameOver) {
+      var p = state.player;
+      var shieldPulse = 1 + 0.08 * Math.sin(state.frame * 0.06);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(68, 221, 255, ' + (0.3 + 0.15 * Math.sin(state.frame * 0.05)) + ')';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#44ddff';
+      ctx.shadowBlur = 15;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 24 * shieldPulse, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(68, 221, 255, 0.06)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 24 * shieldPulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // --- Skill cooldown bar ---
+    if (!state.gameOver) {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.roundRect(10, 10, 80, 8, 4);
+      ctx.fill();
+      if (state.skillReady) {
+        ctx.fillStyle = '#66ddff';
+        ctx.shadowColor = '#66ddff';
+        ctx.shadowBlur = 10;
+        ctx.roundRect(10, 10, 80, 8, 4);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '8px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('E / 双指触屏', 50, 14);
+      } else {
+        var pct = 1 - state.skillCooldown / 180;
+        ctx.fillStyle = '#4488aa';
+        ctx.roundRect(10, 10, 80 * pct, 8, 4);
+        ctx.fill();
+      }
+    }
+
     // --- Level Up Text ---
     if (state.levelUpText > 0) {
       var alpha = Math.min(1, state.levelUpText / 20);
@@ -1220,24 +1557,62 @@
       grad.addColorStop(0.4, '#4488ff');
       grad.addColorStop(1, '#224488');
       ctx.fillStyle = grad;
-    } else {
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.beginPath();
+      ctx.arc(o.x - r*0.2, o.y - r*0.2, r*0.35, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (o.type === 'yellow') {
       ctx.shadowColor = '#ffcc00';
       var grad = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, r);
       grad.addColorStop(0, '#ffffaa');
       grad.addColorStop(0.4, '#ffcc00');
       grad.addColorStop(1, '#886600');
       ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.beginPath();
+      ctx.arc(o.x - r*0.2, o.y - r*0.2, r*0.35, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (o.type === 'heart') {
+      // Draw a heart
+      ctx.shadowColor = '#ff2266';
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = '#ff2266';
+      var s = r * 0.6;
+      ctx.beginPath();
+      ctx.moveTo(o.x, o.y + s);
+      ctx.bezierCurveTo(o.x - s*1.5, o.y - s*0.5, o.x - s*0.5, o.y - s*1.5, o.x, o.y - s*0.5);
+      ctx.bezierCurveTo(o.x + s*0.5, o.y - s*1.5, o.x + s*1.5, o.y - s*0.5, o.x, o.y + s);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else if (o.type === 'shield') {
+      // Draw a shield hexagon
+      ctx.shadowColor = '#44ddff';
+      ctx.shadowBlur = 20;
+      ctx.strokeStyle = '#44ddff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (var i = 0; i < 6; i++) {
+        var angle = i * Math.PI/3 - Math.PI/6;
+        var px = o.x + r * Math.cos(angle);
+        var py = o.y + r * Math.sin(angle);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      // Inner fill
+      ctx.fillStyle = 'rgba(68, 221, 255, 0.2)';
+      ctx.fill();
+      ctx.shadowBlur = 0;
     }
-    ctx.beginPath();
-    ctx.arc(o.x, o.y, r, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Inner shine
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = o.type === 'blue' ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.7)';
-    ctx.beginPath();
-    ctx.arc(o.x - r*0.2, o.y - r*0.2, r*0.35, 0, Math.PI * 2);
-    ctx.fill();
     ctx.shadowBlur = 0;
   }
 
