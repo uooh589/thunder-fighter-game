@@ -859,60 +859,58 @@
     var p = state.player;
 
     if (state.autoPlay && !state.gameOver) {
-      // ===== 二选一: 轨道散步 or 全力逃命 =====
+      // ===== 简化版: X轴重叠检测 + 横向闪避 (学习自ltzj脚本) =====
       if (state.aiA === undefined) state.aiA = 0;
       var spd = p.speed * state.speedMul;
       state.aiA += 0.005;
 
-      // 找最近30帧内会命中的子弹
-      var dangerX = 0, dangerY = 0, dangerT = 999;
+      // === 子弹检测: 只要X轴对齐+朝向自机=危险 ===
+      var dodgeX = 0;
       for (var bi = 0; bi < state.enemyBullets.length; bi++) {
         var eb = state.enemyBullets[bi];
+        // 子弹朝向自机方向?
         var dx = p.x - eb.x, dy = p.y - eb.y;
-        var vx = eb.vx * state.speedMul, vy = eb.vy * state.speedMul;
-        var v2 = vx*vx + vy*vy;
-        if (v2 < 0.1) continue;
-        var th = -(dx*vx + dy*vy) / v2;
-        if (th > 0 && th < 30) {
-          var cx = eb.x + vx*th, cy = eb.y + vy*th;
-          if ((p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy) < (p.hitboxR+6)*(p.hitboxR+6)) {
-            if (th < dangerT) { dangerT = th; dangerX = dx; dangerY = dy; }
-          }
-        }
+        if (dx * eb.vx + dy * eb.vy <= 0) continue; // 背离自机,忽略
+        // X轴对齐?
+        if (Math.abs(eb.x - p.x) > p.hitboxR + 15) continue; // 对不齐
+        // 危险! 往子弹X反方向闪
+        dodgeX = (eb.x < p.x) ? spd : -spd;
+        break;
       }
 
-      if (dangerT < 999) {
-        // 逃命: 朝子弹来的反方向全力冲刺
-        var dLen = Math.sqrt(dangerX*dangerX + dangerY*dangerY);
-        if (dLen > 1) { p.x += (dangerX/dLen) * spd; p.y += (dangerY/dLen) * spd; }
+      if (dodgeX !== 0) {
+        // === 闪避模式: 横向满速移动 ===
+        p.x += dodgeX;
+        // 根据子弹Y方向,适当纵向移动(往下闪避)
+        p.y += spd * 0.3;
       } else {
-        // 散步: 沿轨道逆时针走
+        // === 散步模式: 逆时针椭圆轨道 ===
         var ox = W/2 + Math.cos(state.aiA) * 280;
         var oy = H/2 - Math.sin(state.aiA) * 200;
-        // 顺路捡道具
+        // 顺路捡道具(80px内)
         for (var oi = 0; oi < state.orbs.length; oi++) {
           var o = state.orbs[oi];
           var dx = o.x - ox, dy = o.y - oy;
           var d = Math.sqrt(dx*dx + dy*dy);
-          if (d < 80) { ox += (dx/d) * 15 * (80-d)/80; oy += (dy/d) * 15 * (80-d)/80; }
+          if (d < 80) { ox += (dx/d) * 12 * (80-d)/80; oy += (dy/d) * 12 * (80-d)/80; }
         }
         var dx = ox - p.x, dy = oy - p.y;
         var d = Math.sqrt(dx*dx + dy*dy);
         if (d > 1) { p.x += (dx/d) * Math.min(spd, d*0.4); p.y += (dy/d) * Math.min(spd, d*0.4); }
       }
 
-      // 躲敌机(始终)
+      // === 附加: 躲敌机 + Boss ===
       for (var ei = 0; ei < state.enemies.length; ei++) {
         var e = state.enemies[ei];
         var dx = p.x - e.x, dy = p.y - e.y;
         var d = Math.sqrt(dx*dx + dy*dy);
         if (d < p.hitboxR + e.w/2 + 15 && d > 1) { p.x += (dx/d)*2; p.y += (dy/d)*2; }
       }
-      if (state.boss && p.y < state.boss.y + state.boss.h/2 + 10) p.y += 5;
+      if (state.boss && p.y < state.boss.y + state.boss.h/2 + 10) p.y += spd * 0.3;
       p.x = Math.max(p.hitboxR, Math.min(W-p.hitboxR, p.x));
       p.y = Math.max(p.hitboxR, Math.min(H-p.hitboxR, p.y));
 
-      // 技能
+      // 技能: 弹幕太多时清屏
       if (state.autoSkillUses > 0 && state.skillReady && state.enemyBullets.length > 8) {
         activateBombardment(); state.autoSkillUses--;
       }
