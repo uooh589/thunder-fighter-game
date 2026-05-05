@@ -358,7 +358,7 @@
   });
 
   // ===================== Player =====================
-  function makePlayer() { return { x: W/2, y: H-60, w: 28, h: 34, speed: 5.0 }; }
+  function makePlayer() { return { x: W/2, y: H-60, w: 28, h: 34, hitboxR: 4, speed: 5.0 }; }
 
   // ===================== Attack Patterns =====================
   function getAttackPattern(level) {
@@ -1299,7 +1299,7 @@
         var e = state.enemies[i];
         var dx = p.x - e.x, dy = p.y - e.y;
         var dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < p.w/2 + e.w/2 - 4) {
+        if (dist < p.hitboxR + e.w/2) {
           spawnExplosion(e.x, e.y, e.w, 'orange');
           state.enemies.splice(i, 1);
           if (playerTakeDamage()) return;
@@ -1313,7 +1313,7 @@
       var boss = state.boss;
       var dx = p.x - boss.x, dy = p.y - boss.y;
       var dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < p.w/2 + boss.w/2 - 10) {
+      if (dist < p.hitboxR + boss.w/2 - 6) {
         boss.flash = 8;
         if (playerTakeDamage()) return;
       }
@@ -1325,7 +1325,7 @@
       if (state.invincible > 0) break;
       var dx = p.x - eb.x, dy = p.y - eb.y;
       var dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < p.w/2 + 4) {
+      if (dist < p.hitboxR + 4) {
         spawnExplosion(eb.x, eb.y, 10, 'red');
         state.enemyBullets.splice(i, 1);
         if (playerTakeDamage()) return;
@@ -1766,6 +1766,13 @@
     ctx.fill();
     ctx.beginPath();
     ctx.arc(cx + hw/2, cy + 4, 3, 0, Math.PI * 2);
+    ctx.fill();
+    // Hitbox indicator (tiny center dot)
+    ctx.fillStyle = 'rgba(102, 221, 255, 0.5)';
+    ctx.shadowBlur = 4;
+    ctx.shadowColor = 'rgba(102, 221, 255, 0.3)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 2, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
   }
