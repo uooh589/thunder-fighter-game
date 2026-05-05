@@ -139,18 +139,20 @@
   @media (max-width: 600px) {
     body { align-items: stretch; padding: 0; }
     .game-wrapper {
-      padding: 3px;
-      gap: 3px;
+      padding: 2px;
+      gap: 2px;
       max-width: 100%;
       height: 100dvh;
       height: 100vh;
       justify-content: flex-start;
+      position: relative;
     }
     .canvas-wrap {
       flex: 1;
       max-width: 100%;
       min-height: 0;
       aspect-ratio: auto;
+      position: relative;
     }
     .canvas-wrap canvas {
       width: 100%;
@@ -161,22 +163,69 @@
     .info-bar {
       font-size: 10px;
       flex-shrink: 0;
-      padding: 0 2px;
+      padding: 2px 4px;
+      background: rgba(5,5,16,0.85);
+      border-radius: 4px;
+      margin-bottom: 2px;
     }
     .info-bar .atk-bar .atk-pip { width: 6px; height: 6px; }
-    .controls {
-      font-size: 10px;
-      flex-shrink: 0;
-      line-height: 1.3;
+    /* Touch overlay buttons on canvas */
+    .touch-btn-group {
+      position: absolute;
+      bottom: 6px;
+      left: 6px;
+      right: 6px;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: none;
+      z-index: 5;
     }
-    .restart-btn { font-size: 10px; padding: 3px 10px; }
+    .touch-btn-group .tbtn {
+      pointer-events: auto;
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(102,221,255,0.35);
+      background: rgba(10,10,40,0.65);
+      color: #88ccff;
+      font-size: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      transition: background 0.1s;
+    }
+    .touch-btn-group .tbtn:active {
+      background: rgba(50,100,180,0.5);
+    }
+    .touch-btn-group .tbtn-auto {
+      border-color: rgba(0,255,150,0.4);
+      color: #66ffaa;
+    }
+    .touch-btn-group .tbtn-auto.on {
+      background: rgba(0,200,100,0.25);
+      border-color: rgba(0,255,150,0.7);
+    }
+    .controls {
+      font-size: 9px;
+      flex-shrink: 0;
+      line-height: 1.2;
+      padding: 2px 0;
+      text-align: center;
+    }
+    .restart-btn { font-size: 9px; padding: 2px 8px; }
     .controls .desktop-only { display: none; }
+    .controls .ctrl-text { display: none; }
+    #pauseBtn { display: none; }
   }
   @media (max-width: 400px) {
-    .game-wrapper { padding: 2px; gap: 2px; }
-    .info-bar { font-size: 9px; }
-    .controls { font-size: 9px; }
-    .restart-btn { font-size: 9px; padding: 2px 8px; }
+    .game-wrapper { padding: 1px; gap: 1px; }
+    .info-bar { font-size: 8px; padding: 1px 3px; }
+    .controls { font-size: 8px; }
+    .restart-btn { font-size: 8px; padding: 1px 6px; }
+    .touch-btn-group .tbtn { width: 44px; height: 44px; font-size: 18px; }
   }
   @media (pointer: coarse) {
     canvas { cursor: default; }
@@ -197,10 +246,17 @@
   <div class="canvas-wrap" id="canvasWrap">
     <canvas id="gameCanvas" width="800" height="600"></canvas>
     <div id="touchIndicator"></div>
+    <!-- Mobile touch overlay buttons -->
+    <div class="touch-btn-group" id="touchBtnGroup">
+      <button class="tbtn" id="tbtnSkill">💣</button>
+      <button class="tbtn tbtn-auto" id="tbtnAuto">🤖</button>
+      <button class="tbtn" id="tbtnPause">⏸</button>
+      <button class="tbtn" id="tbtnRestart">✈</button>
+    </div>
   </div>
   <div class="controls">
     <span class="desktop-only"><kbd>↑↓←→</kbd> / <kbd>WASD</kbd> 移动 &nbsp;|&nbsp;</span>
-    <kbd>E</kbd> 轰炸 &nbsp; <kbd>Q</kbd> 托管 &nbsp; <kbd>Esc</kbd> 暂停 &nbsp; <kbd>R</kbd> 重开 &nbsp;|&nbsp;
+    <span class="ctrl-text"><kbd>E</kbd> 轰炸 &nbsp; <kbd>Q</kbd> 托管 &nbsp; <kbd>Esc</kbd> 暂停 &nbsp; <kbd>R</kbd> 重开 &nbsp;|&nbsp;</span>
     <button class="restart-btn" id="restartBtn">✈ 重新开始</button>
     <button class="restart-btn" id="pauseBtn">⏸ 暂停</button>
   </div>
@@ -272,7 +328,22 @@
   document.getElementById('pauseBtn').addEventListener('click', function() {
     state.paused = !state.paused;
     document.getElementById('pauseBtn').textContent = state.paused ? '▶ 继续' : '⏸ 暂停';
+    document.getElementById('tbtnPause').textContent = state.paused ? '▶' : '⏸';
   });
+
+  // Mobile touch button handlers
+  document.getElementById('tbtnSkill').addEventListener('click', function() { if (!state.paused) activateBombardment(); });
+  document.getElementById('tbtnAuto').addEventListener('click', function() {
+    state.autoPlay = !state.autoPlay; state.speedMul = state.autoPlay ? 1.5 : 1;
+    this.classList.toggle('on');
+    updateUI();
+  });
+  document.getElementById('tbtnPause').addEventListener('click', function() {
+    state.paused = !state.paused;
+    this.textContent = state.paused ? '▶' : '⏸';
+    document.getElementById('pauseBtn').textContent = state.paused ? '▶ 继续' : '⏸ 暂停';
+  });
+  document.getElementById('tbtnRestart').addEventListener('click', function() { if (state.gameOver) { state.paused = false; restartGame(); } else { state.paused = false; restartGame(); } });
 
   // ===================== Touch Controls =====================
   var touchActive = false;
