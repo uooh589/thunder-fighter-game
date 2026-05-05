@@ -243,7 +243,7 @@
       <span class="atk-label">⚡火力</span>
       <span class="atk-pips" id="atkPips"></span>
     </div>
-    <span><span id="autoDisplay"></span><span id="shieldDisplay"></span><span id="livesDisplay">❤❤❤</span><button id="soundBtn" class="sound-btn">🔊</button></span>
+    <span><span id="autoDisplay"></span><span id="followerDisplay"></span><span id="bombDisplay"></span><span id="shieldDisplay"></span><span id="livesDisplay">❤❤❤</span><button id="soundBtn" class="sound-btn">🔊</button></span>
   </div>
   <div class="canvas-wrap" id="canvasWrap">
     <canvas id="gameCanvas" width="800" height="600"></canvas>
@@ -1844,6 +1844,12 @@
     for (var i = 0; i < Math.max(0, state.lives); i++) hearts += '❤';
     livesSpan.textContent = hearts;
 
+    // Follower display
+    document.getElementById('followerDisplay').textContent = state.followers.length > 0 ? '🤖' + state.followers.length + ' ' : '';
+    // Bomb display (show total bombs: autoSkillUses + manual)
+    var totalBombs = state.autoSkillUses;
+    document.getElementById('bombDisplay').textContent = totalBombs > 0 ? '💣' + totalBombs + ' ' : '';
+
     // Shield display
     var shieldSpan = document.getElementById('shieldDisplay');
     if (state.shield > 0) {
@@ -2105,15 +2111,12 @@
         ctx.font = '8px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('💣 轰炸', 50, 14);
-        // Show remaining AI uses
-        if (state.autoPlay) {
-          ctx.fillStyle = '#ffffff';
-          ctx.font = '7px Arial';
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'top';
-          ctx.fillText('x' + state.autoSkillUses, 92, 10);
-        }
+        ctx.fillText('💣 轰炸', 50, 12);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '8px Arial';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('x' + state.autoSkillUses, 92, 20);
       } else {
         var pct = 1 - state.skillCooldown / 300;
         ctx.fillStyle = '#884488';
