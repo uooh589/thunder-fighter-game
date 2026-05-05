@@ -859,11 +859,11 @@
     var p = state.player;
 
     if (state.autoPlay && !state.gameOver) {
-      // ===== Hardcore AI: 60帧弹道预测 + 垂直闪避 + 强拾取 =====
+      // ===== Full-Throttle Combat AI: max speed, relentless aggression =====
       var maxSpd = p.speed * state.speedMul;
-      var HIT_R = p.hitboxR + 5; // player hitbox + bullet radius
+      var HIT_R = p.hitboxR + 5;
 
-      // --- Utility: will bullet hit position within 60 frames? ---
+      // Bullet trajectory check (60-frame window)
       function bulletWillHit(cx, cy, eb) {
         var dx = cx - eb.x, dy = cy - eb.y;
         var vx = eb.vx * state.speedMul, vy = eb.vy * state.speedMul;
@@ -872,143 +872,106 @@
         var t = -(dx*vx + dy*vy) / v2;
         if (t < 0 || t > 60) return false;
         var closeX = eb.x + vx*t, closeY = eb.y + vy*t;
-        return ((cx-closeX)*(cx-closeX) + (cy-closeY)*(cy-closeY)) < HIT_R*HIT_R;
+        return ((cx-closeX)*(cx-closeX)+(cy-closeY)*(cy-closeY)) < HIT_R*HIT_R;
       }
 
-      // --- DODGE: find most urgent bullet and move perpendicular ---
-      var dodgeX = 0, dodgeY = 0, dodgeUrgent = 0;
+      // Compute movement direction: dodge + attack blended, always max speed
+      var dirX = 0, dirY = 0;
 
+      // 1) Dodge: perpendicular to any threatening bullet
+      var dodgeX = 0, dodgeY = 0, needDodge = false;
       for (var bi = 0; bi < state.enemyBullets.length; bi++) {
         var eb = state.enemyBullets[bi];
         if (!bulletWillHit(p.x, p.y, eb)) continue;
-        // This bullet will hit us. Perpendicular dodge.
         var vx = eb.vx * state.speedMul, vy = eb.vy * state.speedMul;
         var v = Math.sqrt(vx*vx + vy*vy);
-        if (v < 0.1) { dodgeX += 10; dodgeY += 0; continue; }
-        // Calculate time to impact
+        if (v < 0.1) { dodgeX += 10; needDodge = true; continue; }
         var dx = p.x - eb.x, dy = p.y - eb.y;
         var t = -(dx*vx + dy*vy) / (v*v);
-        var urgency = Math.max(0.1, 1 - t / 60);
-        // Perpendicular to bullet direction (rotate 90)
-        var perpX = -vy / v * 12 * urgency;
-        var perpY = vx / v * 12 * urgency;
-        dodgeX += perpX; dodgeY += perpY;
-        dodgeUrgent = Math.max(dodgeUrgent, urgency);
+        var urg = Math.max(0.1, 1 - t/60);
+        dodgeX += (-vy/v) * 12 * urg;
+        dodgeY += (vx/v) * 12 * urg;
+        needDodge = true;
       }
 
-      // --- ENEMY SHIP AVOIDANCE ---
+      // 2) Enemy ship push
       for (var ei = 0; ei < state.enemies.length; ei++) {
         var e = state.enemies[ei];
         var dx = p.x - e.x, dy = p.y - e.y;
         var dist = Math.sqrt(dx*dx + dy*dy);
-        var danger = p.hitboxR + e.w/2 + 25;
+        var danger = p.hitboxR + e.w/2 + 30;
         if (dist < danger && dist > 1) {
-          var urgency = (danger - dist) / danger;
-          dodgeX += (dx/dist) * 20 * urgency;
-          dodgeY += (dy/dist) * 20 * urgency;
-          dodgeUrgent = 1;
+          dodgeX += (dx/dist) * 20 * (danger-dist)/danger;
+          dodgeY += (dy/dist) * 20 * (danger-dist)/danger;
+          needDodge = true;
         }
       }
-
-      // BOSS: never go above
-      if (state.boss && p.y < state.boss.y + state.boss.h/2 + 25) {
-        dodgeY += 25; dodgeUrgent = 1;
+      // Boss floor
+      if (state.boss && p.y < state.boss.y + state.boss.h/2 + 30) {
+        dodgeY += 25; needDodge = true;
       }
 
-      var moveX = 0, moveY = 0;
-
-      if (dodgeUrgent > 0.3) {
-        // --- DODGE MODE: full speed perpendicular to threat ---
+      if (needDodge) {
+        // Dodge: always max speed perpendicular to threats
         var dLen = Math.sqrt(dodgeX*dodgeX + dodgeY*dodgeY);
-        if (dLen > 0) {
-          moveX = (dodgeX/dLen) * maxSpd;
-          moveY = (dodgeY/dLen) * maxSpd;
-        }
+        if (dLen > 0) { dirX = dodgeX/dLen * maxSpd; dirY = dodgeY/dLen * maxSpd; }
       } else {
-        // --- NORMAL MODE: power-up seeking (蓝球 > 黄球 > 心 > 盾 > 敌人) ---
-
-        // 1) Find best target (orb with highest priority)
-        var bestPullX = 0, bestPullY = 0, bestPull = 0;
-
-        // Check orbs (massive attraction for power-ups & score)
-        for (var oi = 0; oi < state.orbs.length; oi++) {
-          var o = state.orbs[oi];
-          var dx = o.x - p.x, dy = o.y - p.y;
-          var d = Math.sqrt(dx*dx + dy*dy);
-          if (d > 400) continue;
-          var prio = o.type === 'blue' ? 120 : o.type === 'yellow' ? 80 : o.type === 'heart' ? 60 : 40;
-          var pull = prio * Math.max(0, (400 - d) / 400);
-          // Check if orb position is safe
-          var safe = true;
-          for (var bj = 0; bj < state.enemyBullets.length && safe; bj++) {
-            if (bulletWillHit(o.x, o.y, state.enemyBullets[bj])) safe = false;
-          }
-          if (!safe) pull *= 0.3; // risky orb: still go for it but less aggressively
-          if (pull > bestPull) {
-            bestPull = pull;
-            bestPullX = (dx/d) * pull * 0.15;
-            bestPullY = (dy/d) * pull * 0.15;
-          }
-        }
-
-        // 2) Move toward enemy cluster (with safe distance)
+        // ATTACK MODE: full speed toward combat, always
+        // Primary: enemy cluster (with horizontal sweep)
         if (state.enemies.length > 0 || state.boss) {
           var tx, ty;
           if (state.boss) {
             tx = state.boss.x;
-            ty = Math.min(H-30, state.boss.y + state.boss.h/2 + 130);
+            ty = Math.min(H-20, state.boss.y + state.boss.h/2 + 100);
           } else {
             var sx = 0, sy = 0, sw = 0;
             for (var ei = 0; ei < state.enemies.length; ei++) {
-              var e = state.enemies[ei];
-              var w = e.type === 'elite' ? 8 : 2;
-              sx += e.x * w; sy += e.y * w; sw += w;
+              var w = state.enemies[ei].type === 'elite' ? 8 : 2;
+              sx += state.enemies[ei].x * w; sy += state.enemies[ei].y * w; sw += w;
             }
-            tx = sx/sw; ty = Math.min(H*0.72, sy/sw + 150);
+            tx = sx/sw; ty = Math.min(H*0.7, sy/sw + 130);
           }
+          // Full speed toward combat zone with sweep
           var dx = tx - p.x, dy = ty - p.y;
           var d = Math.sqrt(dx*dx + dy*dy);
-          if (d > 10) {
-            var enemyPull = Math.min(1, d / 200) * 4;
-            // Add horizontal sweep for spread coverage
-            var sweep = Math.sin(state.frame * 0.025) * 0.8;
-            // Blend: if there's a strong orb pull, go for it; else go for enemies
-            if (bestPull > 50) {
-              moveX = bestPullX + (dx/d) * 1.5 + sweep;
-              moveY = bestPullY + (dy/d) * 1.0;
-            } else {
-              moveX = (dx/d) * enemyPull + sweep;
-              moveY = (dy/d) * enemyPull;
-            }
+          if (d > 1) {
+            var sweep = Math.sin(state.frame * 0.03) * 2;
+            dirX = (dx/d) * maxSpd + sweep;
+            dirY = (dy/d) * maxSpd;
           }
-        } else if (bestPull > 0) {
-          moveX = bestPullX; moveY = bestPullY;
         } else {
-          // Patrol
-          moveX = (W/2 - p.x) * 0.02 + Math.sin(state.frame*0.03) * 0.5;
-          moveY = (H*0.4 - p.y) * 0.02;
+          // No enemies: full speed patrol sweep
+          dirX = Math.sin(state.frame * 0.02) * 4;
+          dirY = 1.5;
         }
 
-        // Clamp
-        var mLen = Math.sqrt(moveX*moveX + moveY*moveY);
-        if (mLen > maxSpd) { moveX = moveX/mLen * maxSpd; moveY = moveY/mLen * maxSpd; }
-        else if (mLen < 0.3 && state.enemies.length > 0) {
-          // Minimal drift even when idle
-          moveX = Math.sin(state.frame*0.04) * 0.8;
+        // Orb adjustment: gentle nudge toward nearby orbs (doesn't override combat)
+        var bestOrbX = 0, bestOrbY = 0, bestOrbW = 0;
+        for (var oi = 0; oi < state.orbs.length; oi++) {
+          var o = state.orbs[oi];
+          var dx = o.x - p.x, dy = o.y - p.y;
+          var d = Math.sqrt(dx*dx + dy*dy);
+          if (d > 350) continue;
+          var w = o.type === 'blue' ? 5 : o.type === 'yellow' ? 3 : o.type === 'heart' ? 4 : 2;
+          w *= Math.max(0, (350 - d) / 350);
+          if (w > bestOrbW) { bestOrbW = w; bestOrbX = (dx/d)*w*3; bestOrbY = (dy/d)*w*3; }
         }
+        dirX += bestOrbX;
+        dirY += bestOrbY;
+
+        // Normalize to max speed
+        var dirLen = Math.sqrt(dirX*dirX + dirY*dirY);
+        if (dirLen > 0.1) { dirX = dirX/dirLen * maxSpd; dirY = dirY/dirLen * maxSpd; }
       }
 
-      p.x += moveX; p.y += moveY;
+      p.x += dirX; p.y += dirY;
       p.x = Math.max(p.hitboxR, Math.min(W-p.hitboxR, p.x));
       p.y = Math.max(p.hitboxR, Math.min(H-p.hitboxR, p.y));
 
-      // --- SKILL: use when about to be hit (defensive only) ---
-      if (state.autoSkillUses > 0 && state.skillReady && dodgeUrgent > 0.8) {
-        // Check if even dodging might not be enough (surrounded)
-        if (state.enemyBullets.length > 3) {
-          activateBombardment();
-          state.autoSkillUses--;
-        }
+      // Skill: defensive only when about to be hit with no escape
+      if (state.autoSkillUses > 0 && state.skillReady && needDodge && state.enemyBullets.length > 5) {
+        activateBombardment();
+        state.autoSkillUses--;
       }
     } else if (touchActive) {
       var dx = touchX - p.x;
