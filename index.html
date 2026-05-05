@@ -372,6 +372,8 @@
     paused: false,
     menu: true,
     easterEgg: 0,
+    screenShake: 0,
+    floatTexts: [],
     running: true
   };
 
@@ -923,14 +925,24 @@
   }
 
   // ===================== Score =====================
+  function getScoreMul() {
+    var ai = state.ai_;
+    if (!ai) return 1;
+    return [1, 1.5, 2, 3, 5, 10][ai.rank] || 1;
+  }
+
   function addKillScore(points) {
+    var mul = getScoreMul();
+    points = Math.round(points * mul);
     state.score += points;
+    state.floatTexts.push({ x: state.player ? state.player.x + (Math.random()-0.5)*30 : W/2, y: state.player ? state.player.y - 20 : H/2, text: '+'+points, life: 30, r: 255, g: 220, b: 100 });
     checkThresholds();
     updateUI();
   }
 
   function addBonusScore(points) {
     state.score += points;
+    state.floatTexts.push({ x: state.player ? state.player.x + (Math.random()-0.5)*30 : W/2, y: state.player ? state.player.y - 30 : H/2, text: '+'+points, life: 30, r: 100, g: 221, b: 255 });
     updateUI();
   }
 
@@ -995,6 +1007,8 @@
     state.ai_ = null;
     state.aiRank = 0;
     state.easterEgg = 0;
+    state.screenShake = 0;
+    state.floatTexts = [];
     state.flashOverlay = null;
     state.levelUpText = 0;
     state.running = true;
@@ -1181,14 +1195,20 @@
       spawnOrb('yellow', 30 + Math.random() * (W - 60), -10);
     }
 
-    // --- Heart spawn (every ~600 frames) ---
-    if (state.frame % 600 === 0 && state.lives < state.maxLives) {
-      if (Math.random() < 0.4) spawnHeart();
+    // --- Auto-regen: 1 life every 12s if not hit recently ---
+    if (state.invincible <= 0 && state.lives < state.maxLives && state.frame % 720 === 0) {
+      state.lives++; updateUI();
+      playSFX('heart');
     }
 
-    // --- Shield spawn (every ~800 frames) ---
-    if (state.frame % 800 === 0 && state.shield <= 0) {
-      if (Math.random() < 0.35) spawnShieldItem();
+    // --- Heart spawn (more generous) ---
+    if (state.frame % 450 === 0 && state.lives < state.maxLives) {
+      if (Math.random() < 0.5) spawnHeart();
+    }
+
+    // --- Shield spawn ---
+    if (state.frame % 600 === 0 && state.shield <= 0) {
+      if (Math.random() < 0.4) spawnShieldItem();
     }
 
     // --- Bullet Time: trigger on graze / elite kill / boss phase ---
@@ -1454,6 +1474,7 @@
           e.hp--;
           if (e.hp <= 0) {
             var color = e.type === 'elite' ? 'purple' : e.color === 'green' ? 'green' : 'orange';
+            state.screenShake = 6;
             playSFX('explode');
             spawnExplosion(e.x, e.y, e.w, color);
             // Splitter splits into 2 minions
@@ -1669,6 +1690,17 @@
       if (o.y > H + 20) state.orbs.splice(i, 1);
     }
 
+    // --- Screen shake decay ---
+    if (state.screenShake > 0) state.screenShake *= 0.85;
+    if (state.screenShake < 0.3) state.screenShake = 0;
+
+    // --- Float texts ---
+    for (var i = state.floatTexts.length - 1; i >= 0; i--) {
+      var ft = state.floatTexts[i];
+      ft.y -= 1.5; ft.life--;
+      if (ft.life <= 0) state.floatTexts.splice(i, 1);
+    }
+
     // --- Move particles ---
     for (var i = state.particles.length - 1; i >= 0; i--) {
       var pt = state.particles[i];
@@ -1760,6 +1792,12 @@
       // Redraw stars for animation
       state.frame++;
       return;
+    }
+
+    // --- Screen shake ---
+    if (state.screenShake > 0.5) {
+      ctx.save();
+      ctx.translate((Math.random()-0.5)*state.screenShake*2, (Math.random()-0.5)*state.screenShake*2);
     }
 
     // --- Background ---
@@ -2058,6 +2096,24 @@
       ctx.font = '18px Arial, sans-serif';
       ctx.fillText('按 Esc 或点击"继续"按钮恢复', W/2, H/2 + 40);
     }
+
+    // --- Float texts (score popups) ---
+    for (var i = 0; i < state.floatTexts.length; i++) {
+      var ft = state.floatTexts[i];
+      var a = ft.life / 30;
+      ctx.globalAlpha = a;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgb(' + ft.r + ',' + ft.g + ',' + ft.b + ')';
+      ctx.font = 'bold 16px Arial';
+      ctx.shadowColor = 'rgb(' + ft.r + ',' + ft.g + ',' + ft.b + ')';
+      ctx.shadowBlur = 8;
+      ctx.fillText(ft.text, ft.x, ft.y);
+      ctx.shadowBlur = 0;
+    }
+    ctx.globalAlpha = 1;
+
+    // Restore screen shake transform
+    if (state.screenShake > 0.5) ctx.restore();
 
     // --- Game Over ---
     if (state.gameOver) {
