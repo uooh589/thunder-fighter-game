@@ -638,7 +638,7 @@
   }
 
   function spawnEnemy() {
-    if (state.enemies.length >= 25) return;
+    if (state.enemies.length >= (isMobile ? 18 : 25)) return;
     var cfg = pickEnemyType();
     var size = cfg.size[0] + Math.random() * (cfg.size[1] - cfg.size[0]);
     var spd = cfg.speed[0] + Math.random() * (cfg.speed[1] - cfg.speed[0]);
@@ -727,7 +727,8 @@
   }
 
   function spawnEnemyBullet(x, y, vx, vy) {
-    if (state.enemyBullets.length >= 80) return;
+    var maxBullets = isMobile ? 50 : 70;
+    if (state.enemyBullets.length >= maxBullets) return;
     playSFX('enemyShoot');
     state.enemyBullets.push({ x: x, y: y, vx: vx, vy: vy, w: 6, h: 6 });
   }
@@ -981,7 +982,7 @@
     var spawned = false;
     while (state.score >= state.eliteThreshold) {
       spawnElite(state.eliteThreshold);
-      var eliteIncrement = Math.max(80, 250 - Math.floor(state.score / 20) * 3);
+      var eliteIncrement = Math.max(isMobile ? 120 : 80, 250 - Math.floor(state.score / 20) * 3);
       state.eliteThreshold += eliteIncrement;
       spawned = true;
     }
@@ -1214,9 +1215,10 @@
       state.shootCooldown--;
     }
 
-    // --- Spawn enemies (Director: rank-based density) ---
-    var dirMul = state.aiRank !== undefined ? (1 + state.aiRank * 0.15) : 1;
-    var spawnInterval = Math.max(18, Math.round((50 - Math.floor(state.score / 60)) / (state.speedMul * state.timeScale) / dirMul));
+    // --- Spawn enemies (Director: platform-aware density) ---
+    var dirMul = state.aiRank !== undefined ? (1 + state.aiRank * (isMobile ? 0.08 : 0.15)) : 1;
+    var minInterval = isMobile ? 24 : 16;
+    var spawnInterval = Math.max(minInterval, Math.round((50 - Math.floor(state.score / 60)) / (state.speedMul * state.timeScale) / dirMul));
     if (state.frame % spawnInterval === 0) spawnEnemy();
 
     // --- Yellow orb spawn ---
