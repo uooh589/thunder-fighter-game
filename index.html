@@ -859,11 +859,10 @@
     var p = state.player;
 
     if (state.autoPlay && !state.gameOver) {
-      // ===== Full-Throttle Combat AI: max speed, relentless aggression =====
+      // ===== Lissajous Spectacle AI: 全场飞舞，观赏性优先 =====
       var maxSpd = p.speed * state.speedMul;
       var HIT_R = p.hitboxR + 5;
 
-      // Bullet trajectory check (60-frame window)
       function bulletWillHit(cx, cy, eb) {
         var dx = cx - eb.x, dy = cy - eb.y;
         var vx = eb.vx * state.speedMul, vy = eb.vy * state.speedMul;
@@ -875,10 +874,7 @@
         return ((cx-closeX)*(cx-closeX)+(cy-closeY)*(cy-closeY)) < HIT_R*HIT_R;
       }
 
-      // Compute movement direction: dodge + attack blended, always max speed
-      var dirX = 0, dirY = 0;
-
-      // 1) Dodge: perpendicular to any threatening bullet
+      // --- DODGE: override everything if threatened ---
       var dodgeX = 0, dodgeY = 0, needDodge = false;
       for (var bi = 0; bi < state.enemyBullets.length; bi++) {
         var eb = state.enemyBullets[bi];
@@ -888,90 +884,89 @@
         if (v < 0.1) { dodgeX += 10; needDodge = true; continue; }
         var dx = p.x - eb.x, dy = p.y - eb.y;
         var t = -(dx*vx + dy*vy) / (v*v);
-        var urg = Math.max(0.1, 1 - t/60);
-        dodgeX += (-vy/v) * 12 * urg;
-        dodgeY += (vx/v) * 12 * urg;
+        dodgeX += (-vy/v) * 14 * (1 - t/60);
+        dodgeY += (vx/v) * 14 * (1 - t/60);
         needDodge = true;
       }
-
-      // 2) Enemy ship push
       for (var ei = 0; ei < state.enemies.length; ei++) {
         var e = state.enemies[ei];
         var dx = p.x - e.x, dy = p.y - e.y;
         var dist = Math.sqrt(dx*dx + dy*dy);
-        var danger = p.hitboxR + e.w/2 + 30;
-        if (dist < danger && dist > 1) {
-          dodgeX += (dx/dist) * 20 * (danger-dist)/danger;
-          dodgeY += (dy/dist) * 20 * (danger-dist)/danger;
-          needDodge = true;
+        if (dist < p.hitboxR + e.w/2 + 25 && dist > 1) {
+          dodgeX += (dx/dist) * 18; dodgeY += (dy/dist) * 18; needDodge = true;
         }
       }
-      // Boss floor
-      if (state.boss && p.y < state.boss.y + state.boss.h/2 + 30) {
-        dodgeY += 25; needDodge = true;
-      }
+      if (state.boss && p.y < state.boss.y + state.boss.h/2 + 25) { dodgeY += 20; needDodge = true; }
 
       if (needDodge) {
-        // Dodge: always max speed perpendicular to threats
         var dLen = Math.sqrt(dodgeX*dodgeX + dodgeY*dodgeY);
-        if (dLen > 0) { dirX = dodgeX/dLen * maxSpd; dirY = dodgeY/dLen * maxSpd; }
+        if (dLen > 0) { p.x += dodgeX/dLen * maxSpd; p.y += dodgeY/dLen * maxSpd; }
+        p.x = Math.max(p.hitboxR, Math.min(W-p.hitboxR, p.x));
+        p.y = Math.max(p.hitboxR, Math.min(H-p.hitboxR, p.y));
       } else {
-        // ATTACK MODE: full speed toward combat, always
-        // Primary: enemy cluster (with horizontal sweep)
+        // === LISSAJOUS PATH: 自机在全屏画"8"字 / 无穷号 ===
+        var t = state.frame * 0.012;
+        // Base Lissajous: two sine waves at different frequencies
+        var baseX = W/2 + Math.sin(t) * 320 + Math.sin(t * 0.5) * 60;
+        var baseY = H/2 + Math.sin(t * 0.7 + 1.2) * 220 + Math.sin(t * 0.3) * 30;
+        // Clamp to stay well within screen
+        baseX = Math.max(50, Math.min(W-50, baseX));
+        baseY = Math.max(50, Math.min(H-50, baseY));
+
+        // Enemy attraction: gentle pull toward enemy area
+        var attractX = 0, attractY = 0;
         if (state.enemies.length > 0 || state.boss) {
-          var tx, ty;
+          var ex = 0, ey = 0, ew = 0;
           if (state.boss) {
-            tx = state.boss.x;
-            ty = Math.min(H-20, state.boss.y + state.boss.h/2 + 100);
-          } else {
-            var sx = 0, sy = 0, sw = 0;
-            for (var ei = 0; ei < state.enemies.length; ei++) {
-              var w = state.enemies[ei].type === 'elite' ? 8 : 2;
-              sx += state.enemies[ei].x * w; sy += state.enemies[ei].y * w; sw += w;
-            }
-            tx = sx/sw; ty = Math.min(H*0.7, sy/sw + 130);
+            ex = state.boss.x; ey = state.boss.y + state.boss.h/2; ew = 8;
           }
-          // Full speed toward combat zone with sweep
-          var dx = tx - p.x, dy = ty - p.y;
+          for (var ei = 0; ei < state.enemies.length; ei++) {
+            var e = state.enemies[ei];
+            var w = e.type === 'elite' ? 6 : 2;
+            ex += e.x * w; ey += e.y * w; ew += w;
+          }
+          if (ew > 0) { ex /= ew; ey /= ew; }
+          var dx = ex - baseX, dy = ey - baseY;
           var d = Math.sqrt(dx*dx + dy*dy);
-          if (d > 1) {
-            var sweep = Math.sin(state.frame * 0.03) * 2;
-            dirX = (dx/d) * maxSpd + sweep;
-            dirY = (dy/d) * maxSpd;
+          if (d > 5) {
+            attractX = (dx/d) * Math.min(80, d) * 0.2;
+            attractY = (dy/d) * Math.min(80, d) * 0.2;
           }
-        } else {
-          // No enemies: full speed patrol sweep
-          dirX = Math.sin(state.frame * 0.02) * 4;
-          dirY = 1.5;
         }
 
-        // Orb adjustment: gentle nudge toward nearby orbs (doesn't override combat)
-        var bestOrbX = 0, bestOrbY = 0, bestOrbW = 0;
+        // Orb attraction (gentle detour)
+        var orbX = 0, orbY = 0;
         for (var oi = 0; oi < state.orbs.length; oi++) {
           var o = state.orbs[oi];
-          var dx = o.x - p.x, dy = o.y - p.y;
+          var dx = o.x - baseX, dy = o.y - baseY;
           var d = Math.sqrt(dx*dx + dy*dy);
-          if (d > 350) continue;
-          var w = o.type === 'blue' ? 5 : o.type === 'yellow' ? 3 : o.type === 'heart' ? 4 : 2;
-          w *= Math.max(0, (350 - d) / 350);
-          if (w > bestOrbW) { bestOrbW = w; bestOrbX = (dx/d)*w*3; bestOrbY = (dy/d)*w*3; }
+          if (d < 200) {
+            var w = (o.type === 'blue' ? 3 : o.type === 'heart' ? 2.5 : 1.5);
+            orbX += (dx/d) * w * (200-d)/200 * 30;
+            orbY += (dy/d) * w * (200-d)/200 * 30;
+          }
         }
-        dirX += bestOrbX;
-        dirY += bestOrbY;
 
-        // Normalize to max speed
-        var dirLen = Math.sqrt(dirX*dirX + dirY*dirY);
-        if (dirLen > 0.1) { dirX = dirX/dirLen * maxSpd; dirY = dirY/dirLen * maxSpd; }
+        // Combine: Lissajous base + enemy attraction + orb detour
+        var targetX = baseX + attractX + orbX;
+        var targetY = baseY + attractY + orbY;
+        targetX = Math.max(30, Math.min(W-30, targetX));
+        targetY = Math.max(30, Math.min(H-30, targetY));
+
+        // Full speed toward target
+        var dx = targetX - p.x, dy = targetY - p.y;
+        var d = Math.sqrt(dx*dx + dy*dy);
+        if (d > 2) {
+          p.x += (dx/d) * maxSpd;
+          p.y += (dy/d) * maxSpd;
+        }
+        p.x = Math.max(p.hitboxR, Math.min(W-p.hitboxR, p.x));
+        p.y = Math.max(p.hitboxR, Math.min(H-p.hitboxR, p.y));
       }
 
-      p.x += dirX; p.y += dirY;
-      p.x = Math.max(p.hitboxR, Math.min(W-p.hitboxR, p.x));
-      p.y = Math.max(p.hitboxR, Math.min(H-p.hitboxR, p.y));
-
-      // Skill: defensive only when about to be hit with no escape
+      // Skill: when dodging is impossible
       if (state.autoSkillUses > 0 && state.skillReady && needDodge && state.enemyBullets.length > 5) {
-        activateBombardment();
-        state.autoSkillUses--;
+        activateBombardment(); state.autoSkillUses--;
       }
     } else if (touchActive) {
       var dx = touchX - p.x;
