@@ -358,11 +358,11 @@
   });
 
   // ===================== Player =====================
-  function makePlayer() { return { x: W/2, y: H-60, w: 28, h: 34, speed: 4.2 }; }
+  function makePlayer() { return { x: W/2, y: H-60, w: 28, h: 34, speed: 5.0 }; }
 
   // ===================== Attack Patterns =====================
   function getAttackPattern(level) {
-    var spd = 8.2;
+    var spd = 9.0;
     if (level <= 0) return [{ ox: 0, dx: 0, dy: -spd }];
 
     if (level === 1) return [
@@ -406,12 +406,12 @@
 
   // ===================== Enemy Type Config =====================
   var ENEMY_TYPES = [
-    { id: 'basic',   minScore: 0,   hp: 1, speed: [0.6, 1.5], size: [14, 24], weight: 45, color: 'red' },
-    { id: 'fast',    minScore: 100, hp: 1, speed: [1.8, 3.2], size: [10, 16], weight: 22, color: 'orange' },
-    { id: 'tank',    minScore: 200, hp: 3, speed: [0.4, 0.9], size: [26, 36], weight: 15, color: 'darkred' },
-    { id: 'shooter', minScore: 300, hp: 1, speed: [0.6, 1.2], size: [16, 24], weight: 18, color: 'magenta' },
-    { id: 'waver',   minScore: 400, hp: 1, speed: [0.7, 1.4], size: [14, 22], weight: 16, color: 'cyan' },
-    { id: 'splitter',minScore: 500, hp: 2, speed: [0.7, 1.2], size: [18, 26], weight: 12, color: 'green' },
+    { id: 'basic',   minScore: 0,   hp: 1, speed: [0.7, 1.8], size: [14, 24], weight: 45, color: 'red' },
+    { id: 'fast',    minScore: 100, hp: 1, speed: [2.0, 3.5], size: [10, 16], weight: 22, color: 'orange' },
+    { id: 'tank',    minScore: 200, hp: 3, speed: [0.5, 1.0], size: [26, 36], weight: 15, color: 'darkred' },
+    { id: 'shooter', minScore: 300, hp: 1, speed: [0.7, 1.4], size: [16, 24], weight: 18, color: 'magenta' },
+    { id: 'waver',   minScore: 400, hp: 1, speed: [0.8, 1.6], size: [14, 22], weight: 16, color: 'cyan' },
+    { id: 'splitter',minScore: 500, hp: 2, speed: [0.8, 1.4], size: [18, 26], weight: 12, color: 'green' },
   ];
 
   function getEnemyPool() {
@@ -864,7 +864,7 @@
       var dy = touchY - p.y;
       var dist = Math.sqrt(dx*dx + dy*dy);
       if (dist > 5) {
-        var moveSpd = Math.min(5.5, dist * 0.13 + 3);
+        var moveSpd = Math.min(6.5, dist * 0.14 + 3.5);
         p.x += (dx / dist) * moveSpd;
         p.y += (dy / dist) * moveSpd;
       }
@@ -892,7 +892,7 @@
     }
 
     // --- Spawn enemies (dynamic rate based on score) ---
-    var spawnInterval = Math.max(22, 55 - Math.floor(state.score / 60));
+    var spawnInterval = Math.max(20, 50 - Math.floor(state.score / 60));
     if (state.frame % spawnInterval === 0) spawnEnemy();
 
     // --- Yellow orb spawn ---
@@ -1555,19 +1555,19 @@
       ctx.restore();
     }
 
-    // --- Shield visual (barely visible, never covers player) ---
+    // --- Shield visual (minimal — just a couple faint dots) ---
     if (state.shield > 0 && !state.gameOver) {
       var p = state.player;
-      var pulse = 1 + 0.04 * Math.sin(state.frame * 0.03);
-      ctx.save();
-      ctx.strokeStyle = 'rgba(68, 221, 255, 0.06)';
-      ctx.lineWidth = 1;
-      ctx.shadowColor = 'rgba(68, 221, 255, 0.15)';
-      ctx.shadowBlur = 5;
+      ctx.fillStyle = 'rgba(68, 221, 255, 0.12)';
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 20 * pulse, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
+      ctx.arc(p.x - 16, p.y - 18, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(p.x + 16, p.y - 18, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(p.x, p.y + 20, 2, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     // --- Skill cooldown bar ---
