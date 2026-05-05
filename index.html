@@ -200,8 +200,9 @@
   </div>
   <div class="controls">
     <span class="desktop-only"><kbd>↑↓←→</kbd> / <kbd>WASD</kbd> 移动 &nbsp;|&nbsp;</span>
-    <kbd>E</kbd> 轰炸 &nbsp; <kbd>Q</kbd> 托管 &nbsp; <kbd>R</kbd> 重开 &nbsp;|&nbsp;
+    <kbd>E</kbd> 轰炸 &nbsp; <kbd>Q</kbd> 托管 &nbsp; <kbd>Esc</kbd> 暂停 &nbsp; <kbd>R</kbd> 重开 &nbsp;|&nbsp;
     <button class="restart-btn" id="restartBtn">✈ 重新开始</button>
+    <button class="restart-btn" id="pauseBtn">⏸ 暂停</button>
   </div>
 </div>
 <script>
@@ -248,6 +249,7 @@
     speedMul: 1,
     flashOverlay: null,
     levelUpText: 0,
+    paused: false,
     running: true
   };
 
@@ -255,18 +257,19 @@
   var keys = {};
   window.addEventListener('keydown', function(e) {
     keys[e.key] = true;
-    if (e.key === 'r' || e.key === 'R') restartGame();
-    if (e.key === 'q' || e.key === 'Q') {
-      state.autoPlay = !state.autoPlay;
-      state.speedMul = state.autoPlay ? 1.5 : 1;
-      updateUI();
-    }
-    if (e.key === 'e' || e.key === 'E') { activateBombardment(); keys['e'] = false; keys['E'] = false; }
+    if (e.key === 'r' || e.key === 'R') { if (state.gameOver) restartGame(); else { state.paused = false; restartGame(); } }
+    if (e.key === 'Escape') { state.paused = !state.paused; }
+    if (e.key === 'q' || e.key === 'Q') { if (!state.paused) { state.autoPlay = !state.autoPlay; state.speedMul = state.autoPlay ? 1.5 : 1; updateUI(); } }
+    if (e.key === 'e' || e.key === 'E') { if (!state.paused) { activateBombardment(); keys['e'] = false; keys['E'] = false; } }
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
         e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ') e.preventDefault();
   });
   window.addEventListener('keyup', function(e) { keys[e.key] = false; });
   document.getElementById('restartBtn').addEventListener('click', restartGame);
+  document.getElementById('pauseBtn').addEventListener('click', function() {
+    state.paused = !state.paused;
+    document.getElementById('pauseBtn').textContent = state.paused ? '▶ 继续' : '⏸ 暂停';
+  });
 
   // ===================== Touch Controls =====================
   var touchActive = false;
@@ -847,91 +850,139 @@
 
   // ===================== Update =====================
   function update() {
-    if (state.gameOver) return;
+    if (state.gameOver || state.paused) return;
     state.frame++;
 
     // --- Player movement (auto-play / keyboard / touch) ---
     var p = state.player;
 
     if (state.autoPlay && !state.gameOver) {
-      // ---- Auto-play AI: aggressive hunter ----
-      var moveX = 0, moveY = 0;
+      // ---- Perfect Dodge AI: trajectory prediction ----
+      var HITBOX_R = p.hitboxR + 4; // player hitbox radius + bullet radius
 
-      // 1) Threat avoidance (weighted by proximity & density)
-      for (var bi = 0; bi < state.enemyBullets.length; bi++) {
-        var eb = state.enemyBullets[bi];
-        var dx = p.x - eb.x, dy = p.y - eb.y;
-        var dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 250 && dist > 0) {
-          var urgency = Math.max(0, (250 - dist) / 250);
-          moveX += (dx / dist) * urgency * 12;
-          moveY += (dy / dist) * urgency * 12;
+      // Evaluate candidate positions on a ring around current position
+      var candidates = [{ dx:0, dy:0 }]; // stay put is always an option
+      for (var a = 0; a < 16; a++) {
+        var angle = a / 16 * Math.PI * 2;
+        var rad = 15 + 25 * (a % 3); // mix of close and far options
+        candidates.push({ dx: Math.cos(angle) * rad, dy: Math.sin(angle) * rad });
+      }
+
+      var bestScore = -Infinity;
+      var bestDx = 0, bestDy = 0;
+
+      for (var ci = 0; ci < candidates.length; ci++) {
+        var candX = p.x + candidates[ci].dx;
+        var candY = p.y + candidates[ci].dy;
+        // Clamp to bounds
+        if (candX < p.hitboxR || candX > W - p.hitboxR || candY < p.hitboxR || candY > H - p.hitboxR) continue;
+
+        var safety = 1;
+        // Check each enemy bullet for closest approach to candidate position
+        for (var bi = 0; bi < state.enemyBullets.length; bi++) {
+          var eb = state.enemyBullets[bi];
+          // Vector from bullet to candidate
+          var dx = candX - eb.x;
+          var dy = candY - eb.y;
+          // Bullet velocity
+          var vx = eb.vx * state.speedMul;
+          var vy = eb.vy * state.speedMul;
+          var vLen2 = vx*vx + vy*vy;
+          if (vLen2 < 0.01) {
+            // Stationary bullet: check current distance
+            var d = Math.sqrt(dx*dx + dy*dy);
+            if (d < HITBOX_R + 10) safety *= Math.max(0.01, d / (HITBOX_R + 10));
+            continue;
+          }
+          // Time of closest approach
+          var t = -(dx*vx + dy*vy) / vLen2;
+          // Only consider future (t > 0) and within 40 frames
+          if (t > 0 && t < 40) {
+            // Position at closest approach
+            var closeX = eb.x + vx * t;
+            var closeY = eb.y + vy * t;
+            var closeDx = candX - closeX;
+            var closeDy = candY - closeY;
+            var dist = Math.sqrt(closeDx*closeDx + closeDy*closeDy);
+            if (dist < HITBOX_R) {
+              // This bullet WILL hit this candidate position
+              safety = 0;
+              break;
+            } else if (dist < HITBOX_R * 3) {
+              // Near miss: reduce safety score
+              var threat = 1 - (dist - HITBOX_R) / (HITBOX_R * 2);
+              safety *= Math.max(0.01, 1 - threat * 0.8);
+            }
+          }
+        }
+        if (safety <= 0) continue; // lethal position, skip
+
+        // Bonus: proximity to enemy cluster (for aggression)
+        var attackScore = 0;
+        var clusterX = 0, clusterY = 0, clusterCount = 0;
+        for (var ei = 0; ei < state.enemies.length; ei++) {
+          var e = state.enemies[ei];
+          var w = e.type === 'elite' ? 3 : (e.type === 'basic' ? 1 : 1.5);
+          clusterX += e.x * w;
+          clusterY += e.y * w;
+          clusterCount += w;
+        }
+        if (clusterCount > 0) {
+          var cx = clusterX / clusterCount, cy = clusterY / clusterCount;
+          var dx = candX - cx, dy = candY - cy;
+          var d = Math.sqrt(dx*dx + dy*dy);
+          attackScore = Math.max(0, 300 - d) / 300;
+        } else {
+          // Patrol toward center-upper
+          var dx = candX - W/2, dy = candY - H*0.3;
+          attackScore = Math.max(0, 200 - Math.sqrt(dx*dx + dy*dy)) / 200;
+        }
+
+        // Bonus: proximity to valuable items
+        var itemScore = 0;
+        for (var oi = 0; oi < state.orbs.length; oi++) {
+          var o = state.orbs[oi];
+          var dx = o.x - candX, dy = o.y - candY;
+          var d = Math.sqrt(dx*dx + dy*dy);
+          var prio = o.type === 'heart' ? 3 : o.type === 'blue' ? 2 : o.type === 'shield' ? 1.5 : 1;
+          if (d < 200) itemScore += prio * (200 - d) / 200;
+        }
+
+        // Total score: safety is king, then attack, then items
+        var score = safety * 1000 + attackScore * 200 + itemScore * 100;
+
+        // Slight preference for movement (visual interest)
+        if (ci > 0) score += 5;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestDx = candidates[ci].dx;
+          bestDy = candidates[ci].dy;
         }
       }
 
-      // 2) Attack: move toward enemy CLUSTER (highest density area)
-      var clusterX = 0, clusterY = 0, clusterCount = 0;
-      for (var ei = 0; ei < state.enemies.length; ei++) {
-        var e = state.enemies[ei];
-        // Weight elites/boss more
-        var weight = e.type === 'elite' ? 3 : 1;
-        clusterX += e.x * weight;
-        clusterY += e.y * weight;
-        clusterCount += weight;
-      }
-      if (clusterCount > 0) {
-        clusterX /= clusterCount;
-        clusterY /= clusterCount;
-        var dx = clusterX - p.x, dy = clusterY - p.y;
-        var dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist > 10) {
-          moveX += (dx / dist) * 4;
-          moveY += (dy / dist) * 4;
-        }
-      } else {
-        // No enemies: patrol center-upper area
-        moveX += (W/2 - p.x) * 0.02;
-        moveY += (H*0.3 - p.y) * 0.02;
-      }
-
-      // 3) Collect items aggressively
-      var closestItem = null, closestDist = Infinity;
-      for (var oi = 0; oi < state.orbs.length; oi++) {
-        var o = state.orbs[oi];
-        var dx = o.x - p.x, dy = o.y - p.y;
-        var d = Math.sqrt(dx*dx + dy*dy);
-        // Prioritize: heart > blue > shield > yellow
-        var priority = o.type === 'heart' ? 0 : o.type === 'blue' ? 1 : o.type === 'shield' ? 2 : 3;
-        var adjustedDist = d * (1 + priority * 0.5);
-        if (adjustedDist < closestDist) {
-          closestDist = adjustedDist;
-          closestItem = o;
-        }
-      }
-      if (closestItem) {
-        var dx = closestItem.x - p.x, dy = closestItem.y - p.y;
-        var d = Math.sqrt(dx*dx + dy*dy);
-        if (d < 200) {
-          moveX += (dx / d) * 5;
-          moveY += (dy / d) * 5;
-        }
-      }
-
-      // Clamp to max speed (with 1.5x multiplier)
+      // Move toward best candidate, clamped to max speed
       var maxSpeed = p.speed * state.speedMul;
-      var moveLen = Math.sqrt(moveX*moveX + moveY*moveY);
+      var moveLen = Math.sqrt(bestDx*bestDx + bestDy*bestDy);
       if (moveLen > maxSpeed) {
-        moveX = moveX / moveLen * maxSpeed;
-        moveY = moveY / moveLen * maxSpeed;
-      } else if (moveLen > 0 && moveLen < maxSpeed * 0.5) {
-        // Always move at least 50% speed when there are enemies
-        if (state.enemies.length > 0 || state.enemyBullets.length > 0) {
-          moveX = moveX / moveLen * maxSpeed * 0.5;
-          moveY = moveY / moveLen * maxSpeed * 0.5;
+        p.x += bestDx / moveLen * maxSpeed;
+        p.y += bestDy / moveLen * maxSpeed;
+      } else if (moveLen > 2) {
+        p.x += bestDx;
+        p.y += bestDy;
+      } else if (state.enemies.length > 0) {
+        // Drift toward enemies even when standing still seems safe
+        var ex = 0, ey = 0, ec = 0;
+        for (var ei = 0; ei < state.enemies.length; ei++) {
+          ex += state.enemies[ei].x; ey += state.enemies[ei].y; ec++;
+        }
+        if (ec > 0) {
+          ex /= ec; ey /= ec;
+          var dx = ex - p.x, dy = ey - p.y;
+          var d = Math.sqrt(dx*dx + dy*dy);
+          if (d > 1) { p.x += dx/d * maxSpeed * 0.3; p.y += dy/d * maxSpeed * 0.3; }
         }
       }
-      p.x += moveX;
-      p.y += moveY;
     } else if (touchActive) {
       var dx = touchX - p.x;
       var dy = touchY - p.y;
@@ -1034,12 +1085,15 @@
       }
     }
 
-    // --- Auto-play: auto-use skill strategically ---
+    // --- Auto-play: dramatic skill usage ---
     if (state.autoPlay && state.skillReady) {
-      var threat = state.enemies.length + state.enemyBullets.length * 0.5;
+      var enemyCount = state.enemies.length;
+      var bulletCount = state.enemyBullets.length;
+      var bossAlive = state.boss && state.boss.hp > 0;
       var hasElite = false;
       for (var si = 0; si < state.enemies.length; si++) { if (state.enemies[si].type === 'elite') hasElite = true; }
-      if (threat > 8 || hasElite || (state.boss && state.boss.hp > 0)) {
+      // Use skill when: many enemies / bullets, elite present, boss, or every ~10s for show
+      if (bulletCount > 5 || enemyCount > 5 || hasElite || bossAlive || (state.frame % 600 === 0 && enemyCount > 0)) {
         activateBombardment();
       }
     }
@@ -1706,6 +1760,21 @@
       ctx.fillRect(0, 0, W, H);
       fa.life--;
       if (fa.life <= 0) state.flashOverlay = null;
+    }
+
+    // --- Pause overlay ---
+    if (state.paused) {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#88ccff';
+      ctx.font = 'bold 48px Arial, sans-serif';
+      ctx.fillText('⏸ 已暂停', W/2, H/2 - 20);
+      ctx.fillStyle = '#6699aa';
+      ctx.font = '18px Arial, sans-serif';
+      ctx.fillText('按 Esc 或点击"继续"按钮恢复', W/2, H/2 + 40);
     }
 
     // --- Game Over ---
