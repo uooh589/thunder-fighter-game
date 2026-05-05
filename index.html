@@ -148,10 +148,8 @@
       position: relative;
     }
     .canvas-wrap {
-      flex: 1;
       max-width: 100%;
-      min-height: 0;
-      aspect-ratio: auto;
+      width: 100%;
       position: relative;
     }
     .canvas-wrap canvas {
@@ -272,7 +270,12 @@
   var livesSpan = document.getElementById('livesDisplay');
   var atkPips = document.getElementById('atkPips');
 
-  var W = 800, H = 600;
+  var isMobile = window.innerWidth < 600;
+  var W = 800;
+  var H = isMobile ? Math.max(750, Math.min(1100, Math.round(800 * window.innerHeight / window.innerWidth))) : 600;
+  canvas.width = W; canvas.height = H;
+  // Set canvas-wrap aspect ratio to match (prevents CSS stretch)
+  document.getElementById('canvasWrap').style.aspectRatio = W + '/' + H;
   var MAX_ATK = 6;
 
   // ===================== State =====================
