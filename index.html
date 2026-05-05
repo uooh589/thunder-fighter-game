@@ -247,6 +247,8 @@
     skillReady: false,
     autoPlay: false,
     speedMul: 1,
+    timeScale: 1,
+    bulletTime: 0,
     autoSkillUses: 3,
     flashOverlay: null,
     levelUpText: 0,
@@ -841,6 +843,8 @@
     state.skillReady = false;
     state.autoPlay = false;
     state.speedMul = 1;
+    state.timeScale = 1;
+    state.bulletTime = 0;
     state.autoSkillUses = 3;
     state.ai_ = null;
     state.aiRank = 0;
@@ -864,7 +868,7 @@
       // ===================== AutoPilot FSM =====================
       if (!state.ai_) { state.ai_ = { fsm:'IDLE',t:0,dd:0,tx:W/2,ty:H*0.4,
         pt:300,ps:0,pn:0,rank:0,combo:0,nh:0,gc:0,gf:0,ip:0,lastSkill:0 }; }
-      var ai = state.ai_, spd = p.speed * state.speedMul;
+      var ai = state.ai_, spd = p.speed * state.speedMul * state.timeScale;
       if (ai.t > 0) ai.t--; ai.pt--; ai.nh++; if (ai.gf>0) ai.gf--; ai.ip += 0.03;
 
       // --- Graze: close to bullets but not hit ---
@@ -1020,7 +1024,7 @@
 
     // --- Spawn enemies (Director: rank-based density) ---
     var dirMul = state.aiRank !== undefined ? (1 + state.aiRank * 0.15) : 1;
-    var spawnInterval = Math.max(18, Math.round((50 - Math.floor(state.score / 60)) / state.speedMul / dirMul));
+    var spawnInterval = Math.max(18, Math.round((50 - Math.floor(state.score / 60)) / (state.speedMul * state.timeScale) / dirMul));
     if (state.frame % spawnInterval === 0) spawnEnemy();
 
     // --- Yellow orb spawn ---
@@ -1040,6 +1044,18 @@
       if (Math.random() < 0.35) spawnShieldItem();
     }
 
+    // --- Bullet Time: trigger on graze / elite kill / boss phase ---
+    if (state.bulletTime > 0) {
+      state.bulletTime--;
+      state.timeScale = 0.3;
+    } else if (state.timeScale < 1) {
+      state.timeScale = Math.min(1, state.timeScale + 0.02);
+    }
+    // Auto-trigger: graze chain
+    if (state.ai_ && state.ai_.gf >= 8 && state.bulletTime <= 0 && state.timeScale >= 0.99) {
+      state.bulletTime = 20;
+    }
+
     // --- Skill cooldown ---
     if (state.skillCooldown > 0) {
       state.skillCooldown--;
@@ -1049,7 +1065,7 @@
     // --- Follower update ---
     for (var i = 0; i < state.followers.length; i++) {
       var f = state.followers[i];
-      f.angle += f.orbitSpeed * 0.7 * state.speedMul;
+      f.angle += f.orbitSpeed * 0.7 * state.speedMul * state.timeScale;
       f.x = state.player.x + Math.cos(f.angle) * f.orbitRadius;
       f.y = state.player.y + Math.sin(f.angle) * f.orbitRadius;
       // Follower barrage shooting
@@ -1097,8 +1113,8 @@
     // --- Move player bullets ---
     for (var i = state.bullets.length - 1; i >= 0; i--) {
       var b = state.bullets[i];
-      b.x += b.vx * state.speedMul;
-      b.y += b.vy * state.speedMul;
+      b.x += b.vx * state.speedMul * state.timeScale;
+      b.y += b.vy * state.speedMul * state.timeScale;
       if (b.y + b.h < 0 || b.y > H || b.x < -20 || b.x > W + 20) {
         state.bullets.splice(i, 1);
       }
@@ -1107,8 +1123,8 @@
     // --- Move enemy bullets ---
     for (var i = state.enemyBullets.length - 1; i >= 0; i--) {
       var eb = state.enemyBullets[i];
-      eb.x += eb.vx * state.speedMul;
-      eb.y += eb.vy * state.speedMul;
+      eb.x += eb.vx * state.speedMul * state.timeScale;
+      eb.y += eb.vy * state.speedMul * state.timeScale;
       if (eb.y > H + 20 || eb.y < -20 || eb.x < -20 || eb.x > W + 20) {
         state.enemyBullets.splice(i, 1);
       }
@@ -1117,8 +1133,8 @@
     // --- Move follower bullets ---
     for (var i = state.followerBullets.length - 1; i >= 0; i--) {
       var fb = state.followerBullets[i];
-      fb.x += fb.vx * state.speedMul;
-      fb.y += fb.vy * state.speedMul;
+      fb.x += fb.vx * state.speedMul * state.timeScale;
+      fb.y += fb.vy * state.speedMul * state.timeScale;
       if (fb.y > H + 20 || fb.y < -20 || fb.x < -20 || fb.x > W + 20) {
         state.followerBullets.splice(i, 1);
       }
@@ -1131,7 +1147,7 @@
 
       if (e.type === 'elite') {
         e.x = e.baseX + Math.sin(state.frame * e.oscSpeed) * e.oscRange;
-        e.y += e.speed * state.speedMul;
+        e.y += e.speed * state.speedMul * state.timeScale;
         e.shootTimer--;
         if (e.shootTimer <= 0) {
           var px = state.player.x - e.x;
@@ -1164,9 +1180,9 @@
         }
       } else if (e.type === 'waver') {
         e.x += Math.sin(state.frame * e.oscSpeed + e.oscPhase) * 2;
-        e.y += e.speed * state.speedMul;
+        e.y += e.speed * state.speedMul * state.timeScale;
       } else if (e.type === 'shooter') {
-        e.y += e.speed * state.speedMul;
+        e.y += e.speed * state.speedMul * state.timeScale;
         e.shootTimer--;
         if (e.shootTimer <= 0 && e.y > 0 && e.y < H * 0.6) {
           var px = state.player.x - e.x;
@@ -1178,7 +1194,7 @@
           e.shootTimer = 60 + Math.floor(Math.random() * 40);
         }
       } else {
-        e.y += e.speed * state.speedMul;
+        e.y += e.speed * state.speedMul * state.timeScale;
       }
       // Remove off-screen
       if (e.y - e.h > H) {
@@ -1193,8 +1209,8 @@
       var boss = state.boss;
       // Phase transitions based on HP %
       var hpPct = boss.hp / boss.maxHp;
-      if (hpPct < 0.5 && boss.phase === 1) boss.phase = 2;
-      if (hpPct < 0.25 && boss.phase === 2) boss.phase = 3;
+      if (hpPct < 0.5 && boss.phase === 1) { boss.phase = 2; if (state.timeScale >= 0.99) state.bulletTime = 30; }
+      if (hpPct < 0.25 && boss.phase === 2) { boss.phase = 3; if (state.timeScale >= 0.99) state.bulletTime = 30; }
 
       if (boss.state === 'entering') {
         boss.y += 1.2;
@@ -1297,6 +1313,7 @@
               spawnSplitMinion(e.x, e.y);
               spawnSplitMinion(e.x, e.y);
             }
+            if (e.type === 'elite' && state.bulletTime <= 0 && state.timeScale >= 0.99) state.bulletTime = 25;
             dropOrb(e.x, e.y, e.type === 'elite' ? 'elite' : e.type);
             addKillScore(e.type === 'tank' ? 20 : (e.type === 'splitter' ? 15 : 10));
             state.enemies.splice(j, 1);
@@ -1491,7 +1508,7 @@
     // --- Move orbs ---
     for (var i = state.orbs.length - 1; i >= 0; i--) {
       var o = state.orbs[i];
-      o.y += o.vy * state.speedMul;
+      o.y += o.vy * state.speedMul * state.timeScale;
       o.timer++;
       if (o.y > H + 20) state.orbs.splice(i, 1);
     }
@@ -1775,6 +1792,22 @@
       ctx.font = 'bold ' + Math.round(36 * scale) + 'px Arial, sans-serif';
       ctx.fillText('⚡ 火力升级!', W/2, H/2 - 80);
       ctx.restore();
+    }
+
+    // --- Bullet Time visual ---
+    if (state.timeScale < 0.8) {
+      var btAlpha = (1 - state.timeScale) * 0.3;
+      // Vignette
+      var vg = ctx.createRadialGradient(W/2, H/2, 100, W/2, H/2, 400);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, 'rgba(0,0,0,' + btAlpha + ')');
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, W, H);
+      // SLOW text
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(200,220,255,' + (btAlpha * 1.5) + ')';
+      ctx.font = 'bold 36px Arial';
+      ctx.fillText('SLOW', W/2, 40);
     }
 
     // --- Screen flash overlay ---
