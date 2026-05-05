@@ -842,6 +842,8 @@
     state.autoPlay = false;
     state.speedMul = 1;
     state.autoSkillUses = 3;
+    state.ai_ = null;
+    state.aiRank = 0;
     state.flashOverlay = null;
     state.levelUpText = 0;
     state.running = true;
@@ -859,69 +861,131 @@
     var p = state.player;
 
     if (state.autoPlay && !state.gameOver) {
-      // ===== 纯脚本式: 有子弹→躲, 没子弹→打 =====
-      if (state.aiDt === undefined) { state.aiDt = 0; state.aiDx = 0; }
-      var spd = p.speed * state.speedMul;
-      var tx = p.x, ty = p.y;
+      // ===================== AutoPilot FSM =====================
+      if (!state.ai_) { state.ai_ = { fsm:'IDLE',t:0,dd:0,tx:W/2,ty:H*0.4,
+        pt:300,ps:0,pn:0,rank:0,combo:0,nh:0,gc:0,gf:0,ip:0,lastSkill:0 }; }
+      var ai = state.ai_, spd = p.speed * state.speedMul;
+      if (ai.t > 0) ai.t--; ai.pt--; ai.nh++; if (ai.gf>0) ai.gf--; ai.ip += 0.03;
 
-      if (state.aiDt > 0) {
-        state.aiDt--;
-        tx = p.x + state.aiDx * 120;
-        ty = p.y + 40;
-      } else {
-        // 检测危险子弹
-        for (var bi = 0; bi < state.enemyBullets.length; bi++) {
-          var eb = state.enemyBullets[bi];
-          var dx = p.x - eb.x, dy = p.y - eb.y;
-          if (dx * eb.vx + dy * eb.vy <= 0) continue;
-          if (Math.abs(eb.x - p.x) > p.hitboxR + 18) continue;
-          state.aiDx = (eb.x < p.x) ? 1 : -1;
-          state.aiDt = 10;
+      // --- Graze: close to bullets but not hit ---
+      for (var bi = 0; bi < state.enemyBullets.length; bi++) {
+        var eb = state.enemyBullets[bi];
+        var dx = p.x - eb.x, dy = p.y - eb.y;
+        var d = Math.sqrt(dx*dx + dy*dy);
+        if (d < 32 && d > p.hitboxR + 6) { ai.gc++; ai.combo++; ai.gf = 10;
+          spawnExplosion(eb.x, eb.y, 5, 'blue'); addBonusScore(1); }
+      }
+      // --- Rank: combo/no-hit → D/C/B/A/S/SS ---
+      var rankNames = ['D','C','B','A','S','SS'];
+      var rankThresholds = [0, 5, 15, 30, 60, 120];
+      var newRank = 0;
+      for (var r = rankThresholds.length-1; r >= 0; r--) {
+        if (ai.combo >= rankThresholds[r] || ai.nh > 300 + r*300) { newRank = r; break; }
+      }
+      if (newRank > ai.rank) ai.rank = newRank;
+      else if (ai.rank > 0 && ai.combo === 0 && ai.nh < 60) ai.rank = Math.max(0, ai.rank-1);
+
+      // --- Threat detection ---
+      var threatDir = 0;
+      for (var bi = 0; bi < state.enemyBullets.length; bi++) {
+        var eb = state.enemyBullets[bi];
+        var dx = p.x - eb.x, dy = p.y - eb.y;
+        if (dx * eb.vx + dy * eb.vy <= 0) continue;
+        if (Math.abs(eb.x - p.x) > p.hitboxR + 18) continue;
+        threatDir = (eb.x < p.x) ? 1 : -1; break;
+      }
+      // Enemy push (always active)
+      var pshX = 0, pshY = 0;
+      for (var ei = 0; ei < state.enemies.length; ei++) {
+        var e = state.enemies[ei]; var dx = p.x - e.x, dy = p.y - e.y; var d = Math.sqrt(dx*dx+dy*dy);
+        if (d < p.hitboxR + e.w/2 + 15 && d > 1) { pshX += (dx/d)*3; pshY += (dy/d)*3; }
+      }
+      if (state.boss && p.y < state.boss.y + state.boss.h/2 + 10) pshY += spd * 0.4;
+
+      // --- Find nearest item ---
+      var nearItem = null, nearDist = Infinity;
+      for (var oi = 0; oi < state.orbs.length; oi++) {
+        var o = state.orbs[oi]; var d = Math.sqrt((o.x-p.x)*(o.x-p.x)+(o.y-p.y)*(o.y-p.y));
+        if (d < 120 && d < nearDist) { nearDist = d; nearItem = o; }
+      }
+
+      // --- FSM ---
+      // State helper
+      function setState(s, dur, dd) { ai.fsm = s; ai.t = dur; if (dd !== undefined) ai.dd = dd; }
+      function attackTarget() {
+        if (state.boss) { ai.tx = state.boss.x; ai.ty = Math.min(H-30, state.boss.y+state.boss.h/2+100); }
+        else if (state.enemies.length > 0) {
+          var sx=0,sy=0,sw=0; for(var ei=0;ei<state.enemies.length;ei++){var w=state.enemies[ei].type==='elite'?6:2;sx+=state.enemies[ei].x*w;sy+=state.enemies[ei].y*w;sw+=w;}
+          ai.tx = sx/sw; ai.ty = Math.min(H*0.75, sy/sw+100);
+        } else { ai.tx = W/2; ai.ty = H*0.4; }
+      }
+
+      switch (ai.fsm) {
+        case 'IDLE':
+          if (threatDir) { setState('DODGE',14,threatDir); break; }
+          if (state.enemies.length > 0) { setState('ATTACK',6); attackTarget(); break; }
+          ai.tx = W/2 + Math.sin(ai.ip)*180; ai.ty = H*0.4 + Math.sin(ai.ip*0.7)*60;
+          break;
+        case 'ATTACK':
+          if (ai.t <= 0) {
+            if (threatDir) { setState('DODGE',15,threatDir); break; }
+            if (nearItem) { setState('PICKUP',12); ai.tx=nearItem.x; ai.ty=nearItem.y; break; }
+            if (ai.pt<=0 && state.enemies.length>2) { setState('PERFORM',50); ai.ps=0; ai.pn=Math.floor(Math.random()*3); ai.pt=500+Math.floor(Math.random()*400); break; }
+            attackTarget(); ai.t = 6;
+          }
+          break;
+        case 'DODGE':
+          ai.tx = p.x + ai.dd*180; ai.ty = p.y + 60;
+          if (ai.t <= 0) setState('ATTACK',5);
+          break;
+        case 'PICKUP':
+          if (ai.t <= 0 || !nearItem) { setState('ATTACK',5); attackTarget(); }
+          else { ai.tx = nearItem.x; ai.ty = nearItem.y; }
+          break;
+        case 'PERFORM': {
+          // Performance sequences
+          var done = false;
+          if (ai.pn === 0) {
+            // 华丽后撤→轰炸→前冲
+            if (ai.ps === 0) { ai.tx = p.x-80; ai.ty = p.y-30; ai.ps=1; }
+            else if (ai.ps === 1 && ai.t < 35) { ai.tx = p.x-80; ai.ty = p.y-30; }
+            else if (ai.ps === 1 && ai.t <= 35) {
+              if (state.skillReady) activateBombardment();
+              ai.ps = 2;
+            } else if (ai.ps === 2) { ai.tx = p.x+120; ai.ty = p.y-50; if (ai.t < 15) done=true; }
+            else done = true;
+          } else if (ai.pn === 1) {
+            // 弹幕穿梭: S形走位
+            ai.tx = W/2 + Math.sin(ai.ip*2)*250;
+            ai.ty = p.y - 20 + Math.sin(ai.ip*3)*40;
+            if (ai.t < 10) done = true;
+          } else {
+            // 贴脸缠斗: 逼近敌人再撤
+            if (ai.ps === 0) { attackTarget(); ai.tx -= 50; ai.ty -= 40; ai.ps=1; }
+            else if (ai.ps === 1 && ai.t > 20) { /* approaching */ }
+            else { ai.tx = p.x-100; ai.ty = p.y-30; ai.ps=2; } // retreat
+            if (ai.t < 8) done = true;
+          }
+          if (done) setState('ATTACK',8);
           break;
         }
-        if (state.aiDt > 0) {
-          tx = p.x + state.aiDx * 120;
-          ty = p.y + 40;
-        } else if (state.enemies.length > 0 || state.boss) {
-          if (state.boss) {
-            tx = state.boss.x;
-            ty = state.boss.y + state.boss.h/2 + 100;
-          } else {
-            var sx = 0, sy = 0, sw = 0;
-            for (var ei = 0; ei < state.enemies.length; ei++) {
-              var w = state.enemies[ei].type === 'elite' ? 6 : 2;
-              sx += state.enemies[ei].x * w; sy += state.enemies[ei].y * w; sw += w;
-            }
-            tx = sx/sw; ty = sy/sw + 100;
-          }
-          for (var oi = 0; oi < state.orbs.length; oi++) {
-            var o = state.orbs[oi];
-            var dx = o.x - tx, dy = o.y - ty;
-            var d = Math.sqrt(dx*dx + dy*dy);
-            if (d < 100) { tx += (dx/d)*20*(100-d)/100; ty += (dy/d)*20*(100-d)/100; }
-          }
-        } else {
-          tx = W/2 + Math.sin(state.frame * 0.015) * 200;
-          ty = H * 0.4;
-        }
       }
 
-      var dx = tx - p.x, dy = ty - p.y;
-      var d = Math.sqrt(dx*dx + dy*dy);
-      if (d > 2) { p.x += (dx/d) * spd; p.y += (dy/d) * spd; }
-      for (var ei = 0; ei < state.enemies.length; ei++) {
-        var e = state.enemies[ei];
-        var dx = p.x - e.x, dy = p.y - e.y;
-        var d = Math.sqrt(dx*dx + dy*dy);
-        if (d < p.hitboxR + e.w/2 + 15 && d > 1) { p.x += (dx/d)*3; p.y += (dy/d)*3; }
-      }
-      if (state.boss && p.y < state.boss.y + state.boss.h/2 + 10) p.y += spd * 0.4;
+      // Move: target + push, full speed
+      var dx = ai.tx + pshX - p.x, dy = ai.ty + pshY - p.y;
+      var d = Math.sqrt(dx*dx+dy*dy);
+      if (d > 2) { p.x += (dx/d)*spd; p.y += (dy/d)*spd; }
       p.x = Math.max(p.hitboxR, Math.min(W-p.hitboxR, p.x));
       p.y = Math.max(p.hitboxR, Math.min(H-p.hitboxR, p.y));
 
-      if (state.autoSkillUses > 0 && state.skillReady && state.enemyBullets.length > 6) {
+      // Skill: rank-based trigger
+      if (state.autoSkillUses>0 && state.skillReady && (state.enemyBullets.length>8 || ai.rank>=4 || ai.fsm==='PERFORM')) {
         activateBombardment(); state.autoSkillUses--;
       }
+
+      // --- Director: dynamic bullet density ---
+      // When AI is at high rank, spawn more enemies for spectacle
+      state.aiRank = ai.rank; // expose for spawn rate adjustment
     } else if (touchActive) {
       var dx = touchX - p.x;
       var dy = touchY - p.y;
@@ -954,8 +1018,9 @@
       state.shootCooldown--;
     }
 
-    // --- Spawn enemies (dynamic rate based on score) ---
-    var spawnInterval = Math.max(20, Math.round((50 - Math.floor(state.score / 60)) / state.speedMul));
+    // --- Spawn enemies (Director: rank-based density) ---
+    var dirMul = state.aiRank !== undefined ? (1 + state.aiRank * 0.15) : 1;
+    var spawnInterval = Math.max(18, Math.round((50 - Math.floor(state.score / 60)) / state.speedMul / dirMul));
     if (state.frame % spawnInterval === 0) spawnEnemy();
 
     // --- Yellow orb spawn ---
@@ -1331,6 +1396,7 @@
     // --- Player damage helper: shield -> follower -> life ---
     function playerTakeDamage() {
       if (state.invincible > 0) return false;
+      if (state.ai_) { state.ai_.combo = 0; state.ai_.nh = 0; }
       if (state.shield > 0) {
         state.shield = 0;
         spawnExplosion(p.x, p.y - 20, 25, 'blue');
@@ -1661,15 +1727,38 @@
       }
     }
 
-    // --- Auto-play indicator ---
+    // --- Auto-play indicator + Rank + Graze ---
     if (state.autoPlay && !state.gameOver) {
-      ctx.fillStyle = 'rgba(0,200,100,0.15)';
+      ctx.fillStyle = 'rgba(0,200,100,0.08)';
       ctx.fillRect(0, 0, W, H);
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = 'rgba(0,255,150,0.5)';
-      ctx.font = 'bold 16px Arial';
-      ctx.fillText('🤖 AUTO', W - 12, 10);
+      // Stylish Rank
+      var ai = state.ai_;
+      if (ai) {
+        var rankNames = ['D','C','B','A','S','SS'];
+        var rankColors = ['#888','#88ccff','#66ff66','#ffcc00','#ff66ff','#ff4444'];
+        var rn = rankNames[ai.rank] || 'D';
+        var rc = rankColors[ai.rank] || '#888';
+        ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+        ctx.shadowColor = rc; ctx.shadowBlur = 20;
+        ctx.fillStyle = rc;
+        ctx.font = 'bold 28px Arial';
+        ctx.fillText('RANK ' + rn, W - 15, 30);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.font = '12px Arial';
+        ctx.fillText('COMBO x' + ai.combo + '  GRAZE ' + ai.gc, W - 15, 62);
+        // Graze flash border
+        if (ai.gf > 0) {
+          ctx.strokeStyle = 'rgba(68,221,255,' + (ai.gf/10*0.3) + ')';
+          ctx.lineWidth = 3;
+          ctx.strokeRect(2, 2, W-4, H-4);
+        }
+      }
+      // Auto label
+      ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+      ctx.fillStyle = 'rgba(0,255,150,0.4)';
+      ctx.font = 'bold 14px Arial';
+      ctx.fillText('🤖 AUTO', W - 12, H - 8);
     }
 
     // --- Level Up Text ---
